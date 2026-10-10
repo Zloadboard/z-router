@@ -4,11 +4,11 @@ Truck route planner for dispatchers: truck-legal TomTom routes, state mileage, t
 
 Live: https://zloadboard.github.io/z-router/
 
-This is the static build of Z Router v0.7.3. There is no server: the page calls the TomTom APIs (Routing, Search, Map Display tiles) straight from the browser.
+This is the static build of Z Router v0.7.3. There is no server: the page calls the TomTom Routing and Search APIs straight from the browser. Map tiles come from TomTom when the key allows Map Display; otherwise the free OpenStreetMap / OpenTopoMap / Esri tiles are used.
 
 ## The TomTom key
 
-A static site cannot hide an API key. `config.js` contains the TomTom key, so anyone can read it. Protect it in the TomTom developer portal by limiting the key to this site's domain (`zloadboard.github.io`). On TomTom's free tier (no credit card), each API has a free monthly allowance shared by all keys on the account; when it is used up, further requests are blocked until the next billing cycle, not charged (see the FAQ at https://docs.tomtom.com/pricing).
+A static site cannot hide an API key. `config.js` contains a TomTom key made only for this site and limited in the TomTom developer portal to the domain `zloadboard.github.io` (other websites get HTTP 403). On TomTom's free tier (no credit card), each API has a free monthly allowance shared by all keys on the account; when it is used up, further requests are blocked until the next billing cycle, not charged (see the FAQ at https://docs.tomtom.com/pricing).
 
 ## Files
 

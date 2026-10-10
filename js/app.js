@@ -788,7 +788,7 @@
     if (!wps[wps.length - 1].text) { showMessage('Enter a destination (End).', 'warn'); return; }
     var filled = wps.filter(function (w) { return w.text || isFinite(w.lat); });
     if (state.config && !state.config.configured) {
-      showMessage('<b>Routing API key not configured.</b> Routing is off: this site was built without a TomTom key in <code>config.js</code>. Rebuild it with <code>TOMTOM_API_KEY</code> set.', 'error');
+      showMessage('<b>Routing API key not configured.</b> Routing is off: this site was built without a TomTom key in <code>config.js</code>. Rebuild it with <code>TOMTOM_WEB_API_KEY</code> set.', 'error');
       return;
     }
     var btn = $('#runBtn'), lbl = $('span', btn);

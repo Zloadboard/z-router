@@ -10,7 +10,7 @@
   var TRUCK_TYPES = [{"id":"semi","label":"Truck Semi"},{"id":"double","label":"Semi w/ Double Trailer"},{"id":"triple","label":"Semi w/ Triple Trailer"},{"id":"bobtail","label":"Bobtail (Tractor only)"},{"id":"straight","label":"Straight Truck"},{"id":"straightTrailer","label":"Straight Truck w/ Trailer"},{"id":"light","label":"Light Truck / Cargo Van"}];
   var TIMEOUT_MS = 30000;
   var LABEL = 'TomTom';
-  var KEY_MISSING = 'Routing API key not configured: this static build has no TomTom key in config.js. Rebuild it with TOMTOM_API_KEY set.';
+  var KEY_MISSING = 'Routing API key not configured: this static build has no TomTom key in config.js. Rebuild it with TOMTOM_WEB_API_KEY set.';
   var realFetch = window.fetch.bind(window);
   var keyCheck = { status: 'unchecked', message: null }, keyCheckP = null;
 
@@ -46,12 +46,19 @@
     if (!KEY) return Promise.resolve();
     if (!keyCheckP) {
       keyCheck.status = 'checking';
-      // one Geocoding request (20K free/month) rather than Search (2.5K free/month)
-      var g = tomtom.buildGeocodeRequest({ q: 'Chicago, IL' });
-      keyCheckP = providerGet(g.url, g.params).then(function () { keyCheck.status = 'ok'; keyCheck.message = null; })
+      // one tiny Search request (the Pages key is enabled for Routing + Search only), plus one probe tile:
+      // TomTom map tiles are used only if that tile loads; otherwise the free tiles are used, silently.
+      var s = tomtom.buildSearchRequest({ q: 'Chicago, IL', typeahead: false, limit: 1 });
+      keyCheckP = Promise.all([providerGet(s.url, s.params), probeTiles()]).then(function () { keyCheck.status = 'ok'; keyCheck.message = null; })
         .catch(function (e) { keyCheck.status = e.code === 'PROVIDER_AUTH' ? 'rejected' : 'error'; keyCheck.message = e.message; });
     }
     return keyCheckP;
+  }
+
+  var tomtomTiles = false;
+  function probeTiles() {
+    var u = 'https://api.tomtom.com/map/1/tile/basic/main/4/4/5.png?tileSize=256&view=Unified&key=' + encodeURIComponent(KEY);
+    return realFetch(u).then(function (r) { tomtomTiles = r.ok; }, function () { tomtomTiles = false; });
   }
 
   // ---------- data files (static) ----------
@@ -71,14 +78,10 @@
 
   // ---------- search ----------
   function suggest(q, at) { var r = tomtom.buildSearchRequest({ q: q, at: at }); return providerGet(r.url, r.params).then(tomtom.normalizeSearch); }
+  // typed text without a picked suggestion -> TomTom fuzzy Search (the Pages key has no Geocoding API)
   function geocode(q) {
-    var r = tomtom.buildGeocodeRequest({ q: q });
-    return providerGet(r.url, r.params).then(function (j) {
-      var item = tomtom.normalizeGeocode(j);
-      if (item) return item;
-      var s = tomtom.buildSearchRequest({ q: q, typeahead: false, limit: 1 });
-      return providerGet(s.url, s.params).then(function (j2) { var hit = tomtom.normalizeSearch(j2)[0]; return hit ? { label: hit.label, lat: hit.lat, lng: hit.lng } : null; });
-    });
+    var s = tomtom.buildSearchRequest({ q: q, typeahead: false, limit: 1 });
+    return providerGet(s.url, s.params).then(function (j) { var hit = tomtom.normalizeSearch(j)[0]; return hit ? { label: hit.label, lat: hit.lat, lng: hit.lng } : null; });
   }
 
   // ---------- route planning (same steps as server.js planTrip / planTomTom) ----------
@@ -183,7 +186,7 @@
   function reply(status, obj) { return new Response(JSON.stringify(obj), { status: status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }); }
   function fail(e) { return reply(e.status || 500, { ok: false, code: e.code || 'ERROR', error: e.message || 'Unexpected error', details: e.notices || undefined }); }
   function configBody() {
-    var ok = !!KEY, tiles = ok && keyCheck.status !== 'rejected';
+    var ok = !!KEY, tiles = ok && keyCheck.status === 'ok' && tomtomTiles;
     return {
       ok: true, provider: 'tomtom', providerLabel: LABEL, configured: ok, hereConfigured: ok, demo: false, static: true,
       message: ok ? null : KEY_MISSING, keyCheck: keyCheck, capabilities: tomtom.CAPABILITIES,
@@ -230,7 +233,7 @@
   };
   // Map tiles straight from TomTom (Map Display API raster tiles); app.js asks for these templates.
   window.ZR_TILE_URL = function (view) {
-    if (!KEY) return null;
+    if (!KEY || !tomtomTiles) return null;
     var k = 'key=' + encodeURIComponent(KEY);
     if (view === 'map') return 'https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?tileSize=256&view=Unified&language=en-US&' + k;
     if (view === 'satellite') return 'https://api.tomtom.com/map/1/tile/sat/main/{z}/{x}/{y}.jpg?' + k;

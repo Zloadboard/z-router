@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Z Router · Truck route planner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23184a7e'/%3E%3Cpath d='M5 9h13v11H5zM19 12h4.5l3.5 4.5V20h-8z' fill='white'/%3E%3Ccircle cx='10' cy='23' r='2.6' fill='white'/%3E%3Ccircle cx='22' cy='23' r='2.6' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<!-- top app bar -->
+<header class="topbar">
+  <span class="logo"><i data-i="truck"></i></span><span class="word" aria-label="Z Router">Z <span>Router</span></span>
+  <form id="mapSearch" class="tsearch" autocomplete="off" role="search">
+    <i data-i="search"></i><input id="mapSearchInput" type="text" placeholder="Search address, city, ZIP on map" aria-label="Search the map">
+    <ul id="mapSearchSuggest" class="suggest hidden"></ul>
+  </form>
+  <span class="sp"></span>
+  <span class="tstat" id="provLine" title=""><span class="pdot"></span>Loading…</span>
+  <div class="menuwrap">
+    <button type="button" class="tbtn" id="settingsBtn" aria-haspopup="true" aria-expanded="false"><i data-i="gear"></i>Settings</button>
+    <div class="menu hidden" id="settingsMenu" role="menu">
+      <button type="button" role="menuitem" data-go="truck"><i data-i="truck"></i>Truck profile</button>
+      <button type="button" role="menuitem" data-go="route"><i data-i="sliders"></i>Routing preferences</button>
+      <button type="button" role="menuitem" data-go="costs"><i data-i="cash"></i>Load economics</button>
+      <div class="msep"></div>
+      <div class="minfo" id="settingsInfo"></div>
+      <button type="button" role="menuitem" id="forgetBtn"><i data-i="close"></i>Forget saved settings…</button>
+    </div>
+  </div>
+</header>
+
+<div id="map"></div>
+<!-- map controls (over the map, below the top bar) -->
+<div class="mapctl">
+  <div class="mc seg"><button type="button" class="view-btn on" data-view="map">Map</button><button type="button" class="view-btn" data-view="terrain">Terrain</button><button type="button" class="view-btn" data-view="satellite">Satellite</button></div>
+  <div class="mc"><button type="button" id="fitBtn" title="Fit route"><i data-i="expand"></i></button></div>
+</div>
+<div id="keyBanner" class="banner hidden"></div>
+
+<div class="printhead">Z Router · Trip report</div>
+
+<!-- planner sidebar: two views like a simple trip planner (Planning -> Results) -->
+<form id="tripForm" class="side" autocomplete="off" novalidate>
+  <div class="pane" id="panelBody">
+  <!-- A) PLANNING VIEW -->
+  <div class="view" id="viewPlan">
+    <section id="cardStops" aria-label="Trip waypoints">
+      <h3 class="sbar">Trip Waypoints</h3>
+      <div id="waypoints" class="stops"></div>
+      <div class="stb rowg">
+        <span class="c4"><button type="button" class="btn gry sm" id="addStop" title="Add a stop at the bottom"><i data-i="plus"></i>Add stop</button>
+        <button type="button" class="btn gry sm" id="swapBtn" title="Reverse the stop order"><i data-i="swap"></i>Reverse</button></span>
+      </div>
+      <div class="hr"></div>
+      <div class="when rowg" id="whenRow">
+        <span class="c2"><i data-i="calendar"></i></span><span class="wl" title="Origin local time">Depart</span>
+        <span class="c4">
+          <label class="in" id="dateBox"><input type="date" id="departDate" name="departDate" aria-label="Depart date"></label>
+          <label class="in" id="timeBox"><input type="time" id="departTime" name="departTime" value="09:00" aria-label="Depart time"></label>
+        </span>
+      </div>
+      <div class="when rowg" id="routeRow">
+        <span class="c2"><i data-i="road"></i></span><span class="wl">Route</span>
+        <span class="c4"><span class="seg" id="routeTypeSeg" title="Route type"><button type="button" data-v="fast" class="on">Fastest</button><button type="button" data-v="short">Shortest</button></span></span>
+        <input type="hidden" name="routeType" id="routeType" value="fast">
+      </div>
+      <div class="grid3 btnrow" id="runRow">
+        <button type="submit" id="runBtn" class="btn run" title="Run trip (Ctrl+Enter)"><span>Run Trip</span></button>
+        <button type="button" class="btn gry" id="resetBtn" title="Clear the stops and the route">Reset Trip</button>
+      </div>
+    </section>
+    <div id="message" class="message hidden"></div>
+
+    <!-- Truck & Settings: ONE collapsed bar; expands to truck, tandems, routing preferences and costs -->
+    <section id="cardSettings" class="coll">
+      <button type="button" class="sbar sbtn" id="setToggle" aria-expanded="false" aria-controls="setBody">
+        <span class="st">Truck &amp; Settings</span><span class="ss" id="truckSum"></span><i data-i="chevDown" class="chev"></i>
+      </button>
+      <div class="alertline hidden" id="truckAlert"></div>
+      <div class="setbody hidden" id="setBody">
+        <div class="cap" id="subTruck">Truck</div>
+        <div class="kv" id="cardTruck">
+          <label class="r2"><span>Profile</span><span class="in"><select id="preset" aria-label="Truck profile preset"></select></span></label>
+          <label><span id="truckTypeLbl">Type</span><span class="in"><select id="truckType" name="type"></select></span></label>
+          <label><span>Axles</span><span class="in"><select id="axleCount" name="axleCount"></select></span></label>
+          <label><span>Height</span><span class="in"><input name="heightFt" value="13" inputmode="numeric" aria-label="Height feet"><em>ft</em><input name="heightIn" value="6" inputmode="numeric" aria-label="Height inches"><em>in</em></span></label>
+          <label><span title="Length sent to routing (many dispatchers use trailer length, 53 ft; overall combination length is ~70–75 ft)">Length</span><span class="in"><input name="lengthFt" value="53" inputmode="numeric" aria-label="Length feet"><em>ft</em><input name="lengthIn" value="0" inputmode="numeric" aria-label="Length inches"><em>in</em></span></label>
+          <label><span>Width</span><span class="in"><input name="widthFt" value="8" inputmode="numeric" aria-label="Width feet"><em>ft</em><input name="widthIn" value="6" inputmode="numeric" aria-label="Width inches"><em>in</em></span></label>
+          <label><span>Weight</span><span class="in"><input name="weightLbs" value="80000" inputmode="numeric" aria-label="Gross weight lbs"><em>lb</em></span></label>
+          <label><span>Hazmat</span><span class="in"><select id="hazmat" name="hazmat"></select></span></label>
+          <label><span>Max speed</span><span class="in"><select id="maxSpeed" name="maxSpeedMph"></select></span></label>
+        </div>
+        <div class="cap" id="subTandem">Tandems</div>
+        <div class="kv">
+          <label><span title="Kingpin to the CENTER of the rear tandem. States that measure to the rearmost axle are converted using the tandem spread.">KP → tandem</span><span class="in"><input id="kpraFt" name="kpraFt" placeholder="40" inputmode="decimal" aria-label="Kingpin to tandem center, feet"><em>ft</em><input name="kpraIn" placeholder="0" inputmode="numeric" aria-label="Kingpin to tandem center, inches"><em>in</em></span></label>
+          <label><span title="Distance between the two trailer axles (typical 49 in = 4 ft 1 in)">Spread</span><span class="in"><input id="spreadFt" name="spreadFt" value="4" inputmode="numeric" aria-label="Tandem spread, feet"><em>ft</em><input name="spreadIn" value="1" inputmode="numeric" aria-label="Tandem spread, inches"><em>in</em></span></label>
+          <label><span>Trailer</span><span class="in"><input id="trailerFt" name="trailerFt" value="53" inputmode="decimal" aria-label="Trailer length"><em>ft</em></span></label>
+          <label title="Preview one state's tandem rule"><span>Preview</span><span class="in"><select id="tandemPreview" aria-label="Preview a state's tandem rule"><option value="">Route states</option></select></span></label>
+          <div id="tandemStatus" class="tstatus r2"></div>
+        </div>
+        <div class="cap" id="subRoute">Routing preferences</div>
+        <div class="checks" id="cardPrefs">
+          <label class="ck" data-cap="avoidTolls"><input type="checkbox" name="avoidTolls">Avoid toll roads<small class="ctag"></small></label>
+          <label class="ck" data-cap="considerTraffic"><input type="checkbox" name="considerTraffic" checked>Consider traffic<small class="ctag"></small></label>
+          <label class="ck" data-cap="avoidFerries"><input type="checkbox" name="avoidFerries">Avoid ferries<small class="ctag"></small></label>
+          <label class="ck" data-cap="reorderStops"><input type="checkbox" name="reorderStops">Re-order stops<small class="ctag"></small></label>
+          <label class="ck" data-cap="avoidTunnels"><input type="checkbox" name="avoidTunnels">Avoid tunnels<small class="ctag"></small></label>
+          <label class="ck" data-cap="seasonalClosures"><input type="checkbox" name="seasonalClosures">Seasonal closures<small class="ctag"></small></label>
+          <label class="ck" data-cap="avoidDirtRoads"><input type="checkbox" name="avoidDirtRoads" checked>Avoid dirt roads<small class="ctag"></small></label>
+          <label class="ck" data-cap="avoidSharpTurns"><input type="checkbox" name="avoidSharpTurns">Avoid sharp turns<small class="ctag"></small></label>
+        </div>
+        <div id="capNote" class="note hidden"></div>
+        <div class="cap" id="subCosts">Costs</div>
+        <div class="kv" id="cardEcon">
+          <label><span>Load rate</span><span class="in"><em>$</em><input id="loadRate" name="loadRate" placeholder="0" inputmode="decimal" aria-label="Load rate"></span></label>
+          <label><span>MPG</span><span class="in"><input id="mpg" name="mpg" value="6.5" inputmode="decimal" aria-label="MPG"></span></label>
+          <label><span>Fuel price</span><span class="in"><em>$</em><input id="fuelPrice" name="fuelPrice" value="3.80" inputmode="decimal" aria-label="Fuel price per gallon"><em>/gal</em></span></label>
+          <label><span>Fuel type</span><span class="in"><select name="fuel" aria-label="Fuel type"><option value="diesel">Diesel</option><option value="gasoline">Gasoline</option></select></span></label>
+          <label><span>Per mile</span><span class="in"><em>$</em><input id="costPerMile" name="costPerMile" value="0.80" inputmode="decimal" aria-label="Cost per mile"><em>/mi</em></span></label>
+          <label><span>Per hour</span><span class="in"><em>$</em><input id="costPerHour" name="costPerHour" value="0" inputmode="decimal" aria-label="Cost per hour"><em>/hr</em></span></label>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- B) RESULTS VIEW (after a successful Run Trip) -->
+  <div class="view hidden" id="viewResults">
+    <section id="cardSummary" aria-label="Trip summary">
+      <h3 class="sbar">Trip Summary</h3>
+      <div class="sumwrap">
+        <table class="sum" id="resTable"><colgroup><col class="ci"><col class="cl"><col><col class="cm"><col class="ct"></colgroup>
+          <tbody id="resTop"></tbody>
+        </table>
+        <table class="sum" id="resBottom"><colgroup><col class="ci"><col class="cl"><col><col class="ci2"><col class="cl2"><col class="cv2"></colgroup><tbody>
+          <tr><td class="i"><i data-i="road"></i></td><td class="l">Dist</td><td class="v" id="resDist"></td><td class="i i2"><i data-i="toll"></i></td><td class="l">Tolls</td><td class="r" id="resTolls"></td></tr>
+          <tr><td class="i"><i data-i="clock"></i></td><td class="l">Time</td><td class="v" id="resTime"></td><td class="i i2"><i data-i="fuel"></i></td><td class="l">Fuel</td><td class="r" id="resFuel"></td></tr>
+          <tr><td class="i"><i data-i="truck"></i></td><td class="l">Driving</td><td class="v" id="resDrive"></td><td class="i i2"><i data-i="tag"></i></td><td class="l">Fixed</td><td class="r" id="resFixed"></td></tr>
+          <tr class="tot"><td class="i"></td><td class="l"></td><td class="v"></td><td class="i i2"><i data-i="receipt"></i></td><td class="l">Total</td><td class="r" id="resTotal"></td></tr>
+        </tbody></table>
+        <div class="xline pos hidden" id="resProfit"></div>
+        <div class="xline red hidden" id="resAlert"></div>
+        <div class="foot" id="resNote"></div>
+      </div>
+    </section>
+    <section aria-label="Trip reports">
+      <h3 class="sbar">Trip Reports</h3>
+      <div class="grid3 rg" id="reportGrid">
+        <button type="button" class="rb" data-report="legs">Legs Itinerary</button>
+        <button type="button" class="rb" data-report="states">State Mileage</button>
+        <button type="button" class="rb" data-report="tandem">Tandem Rules</button>
+        <button type="button" class="rb" data-report="directions">Directions</button>
+        <button type="button" class="rb" data-report="tolls">Tolls &amp; Warnings</button>
+        <button type="button" class="rb" data-report="costs">Load Economics</button>
+        <button type="button" class="rb" data-report="settings">Trip Settings</button>
+        <button type="button" class="rb" data-report="note">Driver Note</button>
+        <button type="button" class="rb" data-report="full">Print / Full Report</button>
+      </div>
+      <div class="grid3 btnrow back" id="backRow">
+        <button type="button" class="btn run" id="backBtn" title="Back to the trip inputs (everything is kept)">Go Back</button>
+        <button type="button" class="btn gry" id="resetBtn2" title="Clear the stops and the route">Reset Trip</button>
+      </div>
+    </section>
+  </div>
+  </div>
+  <p class="fine"><i data-i="warn"></i><span>Estimates only. Before dispatch, check posted signs, clearances, weight and hazmat limits, tandem rules, permits and road conditions.</span></p>
+</form>
+
+<!-- report panel (docked over the map, right side) -->
+<aside id="detailsDrawer" class="drawer hidden" aria-label="Trip report" role="dialog">
+  <div class="dbar"><span id="drawerIcon"></span><h4 id="drawerTitle">Trip report</h4><span class="sp"></span>
+    <button type="button" class="dbtn" id="copyNoteBtn" data-copy><i data-i="note"></i>Copy driver note</button>
+    <button type="button" class="dbtn" id="printBtn"><i data-i="print"></i>Print</button>
+    <button type="button" class="x" id="detailsClose" title="Close (Esc)" aria-label="Close report"><i data-i="close"></i></button></div>
+  <div class="details" id="resDetails"></div>
+</aside>
+<div id="toast" class="toast hidden"></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="js/calc.js"></script>
+<script src="js/tandem.js"></script>
+<script src="js/stops.js"></script>
+<script src="js/icons.js"></script>
+<script src="config.js"></script>
+<script src="js/zr-lib.js"></script>
+<script src="js/static-api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

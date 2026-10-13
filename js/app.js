@@ -664,6 +664,68 @@
     setView('map');
     $$('.view-btn').forEach(function (b) { b.addEventListener('click', function () { setView(b.dataset.view); }); });
     $('#fitBtn').addEventListener('click', fitRoute);
+    map.createPane('tollPane'); map.getPane('tollPane').style.zIndex = 390; // under the route line (overlayPane 400)
+    var tb = $('#tollLayerBtn');
+    if (tb) {
+      var on = true; try { on = localStorage.getItem('zr.tollLayer') !== 'off'; } catch (e) { /* private mode */ }
+      tb.addEventListener('click', function () { setTollLayer(!state.tollOn); });
+      setTollLayer(on);
+    }
+    map.on('zoomend', function () { if (state.lastResult) drawActionMarkers(); });
+  }
+  // ---------- Toll roads layer (bundled OSM geometry, coloured by 5-axle $/mile tier) ----------
+  var TOLL_STYLE = {
+    top: { color: '#7a0019', weight: 6, opacity: 0.95 }, red: { color: '#d7191c', weight: 4, opacity: 0.85 },
+    orange: { color: '#f08a24', weight: 4, opacity: 0.85 }, yellow: { color: '#e0b800', weight: 3.5, opacity: 0.9 },
+    grey: { color: '#8a8a8a', weight: 2, opacity: 0.7, dashArray: '4 4' }
+  };
+  var TOLL_LEGEND = [['top', 'Highest: Skyway, bridges, tunnels'], ['red', '$0.55+ per mile'], ['orange', '$0.30–0.55 per mile'], ['yellow', 'Under $0.30 per mile'], ['grey', 'Other toll road']];
+  function tollPopup(pr) {
+    var rate = pr.fee != null ? 'Flat toll about ' + money(pr.fee) + ' (5 axles)' : pr.rate != null ? 'About $' + (+pr.rate).toFixed(2) + ' per mile (5 axles)' : 'Rate not in our table (estimate uses $0.35/mi)';
+    return '<div class="tpop"><b>' + esc(pr.name) + '</b>' + (pr.state ? ' <span>' + esc(pr.state) + '</span>' : '') +
+      (pr.top ? '<div class="ttop">' + esc(pr.top) + '</div>' : '') + '<div>' + rate + ', electronic tag. Cash / toll-by-plate cost more.</div>' +
+      (pr.source ? '<div><a href="' + esc(pr.source) + '" target="_blank" rel="noopener">Rate source</a></div>' : '') + '</div>';
+  }
+  function loadTollLayer() {
+    if (state.tollLayerP) return state.tollLayerP;
+    state.tollLayerP = fetch('data/toll-roads.geojson').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(function (gj) {
+      state.tollMeta = gj.meta || {};
+      return L.geoJSON(gj, {
+        pane: 'tollPane',
+        style: function (f) { return TOLL_STYLE[f.properties.tier] || TOLL_STYLE.grey; },
+        onEachFeature: function (f, layer) {
+          var pr = f.properties;
+          layer.bindTooltip(esc(pr.name) + ' · ' + (pr.fee != null ? 'flat ~' + money(pr.fee, 0) : pr.rate != null ? '~$' + (+pr.rate).toFixed(2) + '/mi' : 'toll'), { sticky: true, className: 'ttip' });
+          layer.bindPopup(tollPopup(pr));
+        }
+      });
+    }).catch(function (e) { state.tollLayerP = null; toast('Toll roads layer not loaded (' + e.message + ')'); throw e; });
+    return state.tollLayerP;
+  }
+  function tollLegendControl() {
+    if (state.tollLegend) return state.tollLegend;
+    var C2 = L.Control.extend({ options: { position: 'bottomleft' }, onAdd: function () {
+      var d = L.DomUtil.create('div', 'tlegend');
+      d.innerHTML = '<div class="tl-h">Toll roads, 5-axle estimate</div>' + TOLL_LEGEND.map(function (x) {
+        var s = TOLL_STYLE[x[0]];
+        return '<div class="tl-r"><i style="background:' + s.color + (x[0] === 'grey' ? ';height:2px' : '') + '"></i>' + esc(x[1]) + '</div>';
+      }).join('') + '<div class="tl-n">Tag rates; click a road for details. Map data © OpenStreetMap</div>';
+      L.DomEvent.disableClickPropagation(d);
+      return d;
+    } });
+    state.tollLegend = new C2();
+    return state.tollLegend;
+  }
+  function setTollLayer(on) {
+    state.tollOn = !!on;
+    var b = $('#tollLayerBtn'); if (b) { b.classList.toggle('on', state.tollOn); b.setAttribute('aria-pressed', state.tollOn ? 'true' : 'false'); }
+    try { localStorage.setItem('zr.tollLayer', state.tollOn ? 'on' : 'off'); } catch (e) { /* ignore */ }
+    if (!state.tollOn) { if (state.tollLayer) state.map.removeLayer(state.tollLayer); if (state.tollLegend) state.map.removeControl(state.tollLegend); return; }
+    loadTollLayer().then(function (layer) {
+      state.tollLayer = layer;
+      if (!state.tollOn) return;
+      layer.addTo(state.map); tollLegendControl().addTo(state.map);
+    }, function () { setTollLayer(false); });
   }
   function providerTiles(view) {
     var cfg = state.config || {};
@@ -737,10 +799,16 @@
     state.actionLayer.clearLayers();
     var res = state.lastResult, cur = currentTandem();
     if (!res || cur.mode !== 'route' || !cur.ev || !cur.ev.loaded || NON_SEMI[cur.n.type]) return;
+    var placed = []; // label boxes in screen px: stack labels that would overlap (state lines close together)
     cur.ev.actions.forEach(function (a) {
       if (cur.n.kpra != null && a.centerLimitFt >= cur.n.kpra - 1e-9) return;
       var p = pointAtMile(res, a.startMile); if (!p) return;
-      L.marker(p, { icon: L.divIcon({ className: '', iconSize: [0, 0], html: '<span class="sm-dot"></span><span class="state-marker">' + ICON('warn') + esc(a.code) + ' tandems ≤' + T.fmtFt(a.centerLimitFt, 'floor') + '</span>' }) })
+      var txt = esc(a.code) + ' tandems ≤' + T.fmtFt(a.centerLimitFt, 'floor');
+      var pt = state.map.latLngToContainerPoint(p), w = 30 + txt.length * 5.6, h = 18, lift = 0;
+      var hit = function (y) { return placed.some(function (b) { return pt.x + 6 < b.x + b.w && pt.x + 6 + w > b.x && y - h < b.y && y > b.y - b.h; }); };
+      while (lift < 6 && hit(pt.y - 4 - lift * (h + 2))) lift++;
+      placed.push({ x: pt.x + 6, y: pt.y - 4 - lift * (h + 2), w: w, h: h });
+      L.marker(p, { icon: L.divIcon({ className: '', iconSize: [0, 0], html: '<span class="sm-dot"></span><span class="state-marker' + (lift ? ' lifted' : '') + '" style="bottom:' + (4 + lift * (h + 2)) + 'px">' + ICON('warn') + txt + '</span>' }) })
         .bindPopup(esc(a.text)).addTo(state.actionLayer);
     });
   }

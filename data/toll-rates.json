@@ -189,6 +189,50 @@
    "sources": [
     "https://ezpassmaineturnpike.com/EZPass/docs/E-ZPassRateChart5.pdf"
    ]
+  },
+  {
+   "id": "nj-gsp",
+   "name": "Garden State Parkway",
+   "states": [
+    "NJ"
+   ],
+   "match": "Garden State|\\bGSP\\b",
+   "ratePerMile": 0.71,
+   "confidence": "derived",
+   "basis": "Class 5 NJ E-ZPass $11.07 at each of 11 mainline barrier plazas (plus $3.92 at many ramps) over about 172 mi, 2026. Heavy trucks (10,000 lb+, 3+ axles) are banned north of Interchange 105.",
+   "sources": [
+    "https://www.njta.gov/document/2026-parkway-nj-e-zpass-rates/",
+    "https://www.njta.gov/toll-schedules-garden-state-parkway/"
+   ]
+  },
+  {
+   "id": "de-i95",
+   "name": "Delaware Turnpike (I-95)",
+   "states": [
+    "DE"
+   ],
+   "match": "I-95|Delaware Turnpike|Kennedy",
+   "ratePerMile": 0.909,
+   "confidence": "official",
+   "basis": "Newark toll plaza 5 axles $10.00 E-ZPass/cash, one plaza on about 11 mi of I-95 (DelDOT, 2026).",
+   "sources": [
+    "https://deldot.gov/public.ejs?command=PublicTollRateI95"
+   ]
+  },
+  {
+   "id": "md-jfk",
+   "name": "JFK Memorial Hwy (MD I-95)",
+   "states": [
+    "MD"
+   ],
+   "match": "I-95|Kennedy|JFK",
+   "ratePerMile": 0.48,
+   "confidence": "official",
+   "basis": "5 axles $48.00 E-ZPass ($63 video) at the Perryville plaza, northbound only, about 50 mi: $0.96/mi northbound, averaged to $0.48/mi over both directions.",
+   "sources": [
+    "https://mdta.maryland.gov/Toll_Rates/jfk_rates.html",
+    "https://mdta.maryland.gov/TollRatesTables"
+   ]
   }
  ],
  "facilities": [
@@ -370,6 +414,24 @@
    "basis": "MTA Bridges & Tunnels 5 axles $36.84 NY E-ZPass (NYCSC), $65.10 non-NY E-ZPass / tolls by mail, effective Jan 4 2026.",
    "sources": [
     "https://www.mta.info/fares-tolls/tolls/vehicle-types/trucks"
+   ]
+  },
+  {
+   "id": "fort-mchenry",
+   "name": "Fort McHenry Tunnel (I-95)",
+   "state": "MD",
+   "bbox": [
+    39.255,
+    -76.59,
+    39.272,
+    -76.568
+   ],
+   "direction": "any",
+   "fee": 24.0,
+   "confidence": "official",
+   "basis": "MDTA 5 axles $24 E-ZPass (Baltimore Harbor Tunnel, Fort McHenry Tunnel, Key Bridge).",
+   "sources": [
+    "https://mdta.maryland.gov/TollRatesTables"
    ]
   }
  ]

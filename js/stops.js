@@ -43,6 +43,14 @@
     return list.concat([null]);
   }
 
+  /** "Add stop" (v0.9.1): a new empty intermediate stop just above End. */
+  function insertBeforeEnd(list) {
+    var l = list.length >= 2 ? list.slice() : [list[0] || null, null];
+    if (l.length - 2 >= MAX_STOPS) return l;
+    l.splice(l.length - 1, 0, null);
+    return l;
+  }
+
   /** Remove an intermediate stop (Start/End rows are only cleared, never removed). */
   function removeAt(list, idx) {
     if (idx <= 0 || idx >= list.length - 1) { var c = list.slice(); c[idx] = null; return c; }
@@ -79,5 +87,5 @@
     return { pick: pick, move: o.isLast ? 'run' : 'next', prevent: true, wait: wait };
   }
 
-  return { MAX_STOPS: MAX_STOPS, pickIndex: pickIndex, keyAction: keyAction, isEmpty: isEmpty, move: move, insertIndex: insertIndex, dropTarget: dropTarget, toSlots: toSlots, append: append, removeAt: removeAt, reverse: reverse };
+  return { MAX_STOPS: MAX_STOPS, pickIndex: pickIndex, keyAction: keyAction, isEmpty: isEmpty, move: move, insertIndex: insertIndex, dropTarget: dropTarget, toSlots: toSlots, append: append, insertBeforeEnd: insertBeforeEnd, removeAt: removeAt, reverse: reverse };
 });

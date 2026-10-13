@@ -258,11 +258,12 @@
     }
     putValue(wpRow(last), s.end);
     updateAddStop();
+    drawPlanMarkers(null);
   }
   function updateAddStop() {
     var free = S.MAX_STOPS - $$('#waypoints .wp-row.stop.shown').length;
     $('#addStop').disabled = free <= 0;
-    $('#addStop').title = free > 0 ? 'Add a stop at the end (' + free + ' left)' : 'Up to ' + S.MAX_STOPS + ' stops';
+    $('#addStop').title = free > 0 ? 'Add a stop above End (' + free + ' left)' : 'Up to ' + S.MAX_STOPS + ' stops';
     var rows = visibleRows();
     rows.forEach(function (r, i) {
       var b = $('.badge', r), last = i === rows.length - 1;
@@ -270,20 +271,45 @@
       $('.wl', r).textContent = i === 0 ? 'Start' : last ? 'End' : 'Stop ' + i;
     });
   }
-  /** "Add stop": new empty row at the bottom; it becomes End and the previous End becomes the last intermediate stop. */
+  /** "Add stop": a new empty stop box between the last stop and End (End stays End). */
   function addStopRow(focus) {
     var list = readStopList();
     if (list.length - 2 >= S.MAX_STOPS) return null;
-    writeStopList(S.append(list));
-    var end = wpRow(WP_DEFS.length - 1);
-    if (focus) $('input', end).focus();
-    return end;
+    writeStopList(S.insertBeforeEnd(list));
+    var rows = visibleRows(), row = rows[rows.length - 2];
+    if (focus) $('input', row).focus();
+    return row;
   }
   function setWaypoint(idx, item) {
     var row = wpRow(idx); if (!row) return;
     if (row.dataset.role === 'stop' && item) row.classList.add('shown');
     putValue(row, item);
     updateAddStop();
+    drawPlanMarkers(item && isFinite(item.lat) ? row : null);
+  }
+  /** Planning markers (before Run Trip): one labelled pin per located stop box (Start / Stop N / End).
+   * focusRow: the box just picked; with one point the map flies to it, with 2+ it fits all markers. */
+  function drawPlanMarkers(focusRow) {
+    if (!state.map || !state.planLayer) return;
+    state.planLayer.clearLayers();
+    if (state.lastResult && $('#viewResults') && !$('#viewResults').classList.contains('hidden')) return;
+    var rows = visibleRows(), pts = [];
+    rows.forEach(function (r, i) {
+      var inp = $('input', r); if (!inp.dataset.lat) return;
+      var ll = [parseFloat(inp.dataset.lat), parseFloat(inp.dataset.lng)], last = i === rows.length - 1;
+      var role = i === 0 ? 'start' : last ? 'end' : 'stop', name = i === 0 ? 'Start' : last ? 'End' : 'Stop ' + i;
+      pts.push(ll);
+      L.marker(ll, { title: name, icon: L.divIcon({ className: 'pmk-wrap', iconSize: [24, 24], iconAnchor: [12, 12],
+        html: '<div class="pmk" data-name="' + name + '"><div class="mk mk-' + role + '">' + (LETTERS[i] || '') + '</div><b>' + esc(name) + '</b></div>' }) })
+        .bindPopup('<b>' + esc(name) + '</b> ' + esc(inp.value)).addTo(state.planLayer);
+    });
+    if (!focusRow || !pts.length) return;
+    if (pts.length === 1) state.map.flyTo(pts[0], 10, { duration: 0.8 });
+    else {
+      var dr = $('#detailsDrawer'), side = $('#tripForm'), wide = window.innerWidth > 900;
+      var left = wide && side ? side.getBoundingClientRect().right : 0;
+      state.map.flyToBounds(L.latLngBounds(pts), { paddingTopLeft: [left + 50, 60], paddingBottomRight: [90, 40], maxZoom: 10, duration: 0.8 });
+    }
   }
   function readWaypoints() {
     return $$('#waypoints .wp-row').map(function (row) {
@@ -292,11 +318,6 @@
       if (inp.dataset.lat) { w.lat = parseFloat(inp.dataset.lat); w.lng = parseFloat(inp.dataset.lng); w.label = inp.value.trim(); }
       return w;
     });
-  }
-  function reverseStops() {
-    var list = readStopList();
-    if (list.filter(function (v) { return v; }).length < 2) return;
-    writeStopList(S.reverse(list));
   }
   /** Apply a manual reorder (planning view only; v0.7: no automatic re-run, press Run Trip). */
   function applyReorder(from, to) {
@@ -660,6 +681,7 @@
     state.map = map;
     state.routeLayer = L.layerGroup().addTo(map);
     state.markerLayer = L.layerGroup().addTo(map);
+    state.planLayer = L.layerGroup().addTo(map);
     state.warnLayer = L.layerGroup().addTo(map);
     state.stopsLayer = L.layerGroup().addTo(map);
     state.restLayer = L.layerGroup().addTo(map);
@@ -893,6 +915,7 @@
   function renderResult(res) {
     clearRoute();
     state.lastResult = res;
+    if (state.planLayer) state.planLayer.clearLayers();
     applyEiaFuel(res);
     $('#tandemPreview').value = '';
     var r = res.route;
@@ -1679,7 +1702,6 @@
     $('#resetBtn2').addEventListener('click', resetTrip);
     $('#backBtn').addEventListener('click', function () { showView('plan'); });
     $('#setToggle').addEventListener('click', function () { setSettingsOpen($('#setBody').classList.contains('hidden')); });
-    $('#swapBtn').addEventListener('click', reverseStops);
     $('#addStop').addEventListener('click', function () { addStopRow(true); });
     $$('#routeTypeSeg button').forEach(function (b) { b.addEventListener('click', function () { setRouteType(b.dataset.v); saveSettings(); updateSummaries(); }); });
     $$('#reportGrid .rb').forEach(function (b) { b.addEventListener('click', function () { openReport(b.dataset.report); }); });
@@ -1716,7 +1738,7 @@
     initTrips();
     window.TruckRouter = { state: state, runTrip: runTrip, setWaypoint: setWaypoint, readTruck: readTruck, readPrefs: readPrefs, renderResult: renderResult,
       currentTandem: currentTandem, openDetails: openDetails, openReport: openReport, closeDetails: closeDetails, copyNote: copyNote, addStopRow: addStopRow,
-      readStopList: readStopList, applyReorder: applyReorder, reverseStops: reverseStops, setTab: goSetting, goSetting: goSetting, showView: showView,
+      readStopList: readStopList, applyReorder: applyReorder, setTab: goSetting, goSetting: goSetting, showView: showView,
       setSettingsOpen: setSettingsOpen, writeStopList: writeStopList };
   }
   var debouncedEcon = debounce(recalcEconomics, 250);

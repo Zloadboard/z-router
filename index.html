@@ -51,9 +51,10 @@
     <section id="cardStops" aria-label="Trip waypoints">
       <h3 class="sbar">Trip Waypoints</h3>
       <div id="waypoints" class="stops"></div>
-      <div class="stb rowg">
-        <span class="c4"><button type="button" class="btn gry sm" id="addStop" title="Add a stop at the bottom"><i data-i="plus"></i>Add stop</button>
-        <button type="button" class="btn gry sm" id="swapBtn" title="Reverse the stop order"><i data-i="swap"></i>Reverse</button></span>
+      <div class="grid3 btnrow" id="runRow">
+        <button type="submit" id="runBtn" class="btn run" title="Run trip (Ctrl+Enter)"><span>Run Trip</span></button>
+        <button type="button" class="btn gry" id="resetBtn" title="Clear the stops and the route">Reset Trip</button>
+        <button type="button" class="btn gry" id="addStop" title="Add a stop above End"><i data-i="plus"></i>Add stop</button>
       </div>
       <div class="hr"></div>
       <div class="when rowg" id="whenRow">
@@ -67,10 +68,6 @@
         <span class="c2"><i data-i="road"></i></span><span class="wl">Route</span>
         <span class="c4"><span class="seg" id="routeTypeSeg" title="Route type"><button type="button" data-v="fast" class="on">Fastest</button><button type="button" data-v="short">Shortest</button></span></span>
         <input type="hidden" name="routeType" id="routeType" value="fast">
-      </div>
-      <div class="grid3 btnrow" id="runRow">
-        <button type="submit" id="runBtn" class="btn run" title="Run trip (Ctrl+Enter)"><span>Run Trip</span></button>
-        <button type="button" class="btn gry" id="resetBtn" title="Clear the stops and the route">Reset Trip</button>
       </div>
     </section>
     <div id="message" class="message hidden"></div>

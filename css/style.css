@@ -127,6 +127,11 @@ input::placeholder{color:#6b7280}
 .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--g);padding:0 var(--pad)}
 .grid3>.btn,.grid3>.rb{width:100%;min-width:0}
 .btnrow{margin-top:var(--g);padding-bottom:14px}
+#runRow{padding-bottom:0}
+#routeRow{margin-bottom:14px}
+.pmk{position:relative;width:24px;height:24px}
+.pmk .mk{position:absolute;left:0;top:0}
+.pmk b{position:absolute;left:28px;top:2px;white-space:nowrap;background:#fff;color:#000;font:700 12px/20px var(--font);padding:0 6px;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 
 /* Trip Waypoints: one column grid for stop rows, the Add stop row and the Depart row */
 .rowg{display:grid;grid-template-columns:var(--c1) var(--c2) var(--c3) minmax(0,1fr);column-gap:var(--cg);align-items:center;padding:0 var(--pad)}

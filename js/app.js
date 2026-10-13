@@ -20,6 +20,7 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function debounce(fn, ms) { var t; return function () { var a = arguments, self = this; clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms); }; }
   function localISO(d) { d = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return d.toISOString().slice(0, 10); }
+  var HOS = window.ZRHos;
   function mi(v, d) { return (+v || 0).toLocaleString('en-US', { maximumFractionDigits: d == null ? 0 : d }); }
   function fmtMiles(m) { return mi(m, 1) + ' mi'; }
   function mi1(v) { return (+v || 0).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
@@ -1019,10 +1020,9 @@
     if (res.demo) li('Data', 'Demo mode: synthetic route, not real ' + esc(res.providerLabel) + ' data.', true);
     var traffic = res.request && res.request.effectiveSettings && res.request.effectiveSettings.considerTraffic != null ? res.request.effectiveSettings.considerTraffic : readPrefs().considerTraffic;
     li('Traffic', traffic === false ? 'Not considered' : t.trafficDelaySec > 60 ? C.formatDuration(t.trafficDelaySec) + ' delay included in drive time' : 'No delay on this route');
-    var hp = isoParts(hos.arrivalTime);
-    li('HOS estimate', (hp ? 'Arrive ' + hp.day + ' ' + hp.time + (hp.tz ? ' ' + tzName(hos.arrivalTime) : '') + ' · ' : '') +
-      (hos.longBreaks ? hos.longBreaks + ' × 10 h rest, ' : '') + hos.shortBreaks + ' × 30 min break' + (hos.shortBreaks === 1 ? '' : 's') +
-      ' <span class="muted tiny">(simplified: 11 h driving / 10 h off, 30 min after 8 h; ignores the 14-hour window, stops and the 70-hour limit)</span>');
+    var HP = hosRun(res), lastOff = HP.offs[HP.offs.length - 1], late = HP.stops.filter(function (x) { return x.status === 'late'; }).length;
+    li('HOS plan', 'Arrive ' + fmtAt(HP.arriveMs, lastOff) + ' · ' + (HP.totals.restarts ? HP.totals.restarts + ' × 34 h restart, ' : '') + (HP.totals.rests ? HP.totals.rests + ' × 10 h off, ' : '') +
+      HP.totals.breaks + ' × 30 min break' + (HP.totals.breaks === 1 ? '' : 's') + (late ? ' · <b>' + late + ' appointment' + (late === 1 ? '' : 's') + ' late</b>' : ''), late > 0);
     var cur = currentTandem(), ev = cur.mode === 'route' ? cur.ev : T.evaluate({ runs: res.states || [], rules: state.rules, kpraFt: cur.n.kpra, spreadFt: cur.n.spread, trailerLengthFt: cur.n.trailer });
     if (!NON_SEMI[cur.n.type]) {
       if (!ev.loaded) li('Tandems', 'Rules data not loaded — check each state', true);
@@ -1049,7 +1049,7 @@
     var lg = '<div class="dsec"><h5>Schedule</h5><table class="tbl"><tbody>' +
       row3('Depart', dp ? tzName(r.departureTime) : '', dp ? dp.day + ' ' + dp.time : '–') +
       row3('Arrive, driving only', ap ? tzName(r.arrivalTime) : '', ap ? ap.day + ' ' + ap.time : '–') +
-      row3('Arrive with HOS (estimate)', C.formatDuration(hos.breakSec) + ' breaks', hp ? hp.day + ' ' + hp.time : '–') + '</tbody></table></div>';
+      '<tr><td>Arrive with HOS (planner)</td><td id="hosArriveTz"></td><td class="num" id="hosArrive">–</td></tr></tbody></table></div>';
     lg += '<div class="dsec"><h5>Legs</h5><table class="tbl"><thead><tr><th>Leg</th><th class="n">Miles</th><th class="n">Time</th><th class="n">Arrive</th><th class="n">' + (noToll ? 'Toll mi' : 'Tolls') + '</th><th class="n">Cost</th></tr></thead><tbody>';
     r.legs.forEach(function (l, i) {
       var la = isoParts(l.arrivalTime);
@@ -1058,6 +1058,7 @@
     });
     lg += '</tbody>' + (r.legs.length > 1 ? '<tfoot><tr><td>Total</td><td class="n">' + mi(t.miles, 1) + '</td><td class="n">' + C.formatDuration(t.durationSec) + '</td><td></td><td class="n">' +
       (noToll ? mi(r.tolls.miles || 0, 1) : money(r.tolls.total)) + '</td><td class="n">' + money(c.totalCost) + '</td></tr></tfoot>' : '') + '</table></div>';
+    lg += '<div class="dsec" id="hosPlan"></div>';
     lg += '<div class="dsec"><h5>Trip notes</h5>' + tripNotes(res) + '</div>';
     html += sec('legs', lg);
     // State mileage
@@ -1148,10 +1149,68 @@
     $$('[data-copy]', box).forEach(function (b) { b.onclick = copyNote; });
     $$('i.ic-note', box).forEach(function (el) { el.outerHTML = ICON('note'); });
     renderTandemSection();
+    renderHos();
     drawTruck(currentTandem());
     showReport();
     box.scrollTop = keep;
     if (state.stopsShown && state.stopsShown.key === routeKeyOf(res)) renderStops(state.stopsShown.items, state.stopsShown.note);
+  }
+  // ---------- HOS planner + appointment times (public/js/hos.js) ----------
+  function hosPrefs() { var d = { used: 0, cycle: 70, dwell: 60 }; try { return Object.assign(d, JSON.parse(localStorage.getItem('zr.hos') || '{}')); } catch (e) { return d; } }
+  function apptStore() { try { return JSON.parse(localStorage.getItem('zr.appts') || '{}'); } catch (e) { return {}; } }
+  function offStr(off) { var a = Math.abs(off); return (off < 0 ? '-' : '+') + ('0' + Math.floor(a / 60)).slice(-2) + ':' + ('0' + a % 60).slice(-2); }
+  function msIso(ms, off) { return HOS.msToLocal(ms, off) + ':00' + offStr(off); }
+  function fmtAt(ms, off) { var iso = msIso(ms, off), p = isoParts(iso); return p.day + ' ' + p.time + ' ' + tzName(iso); }
+  function apptKey(i, leg) { return (i + 1) + '|' + (leg.to || ''); }
+  /** Plan with the route's legs; each stop keeps its own UTC offset (from the provider's arrival times). */
+  function hosRun(res) {
+    var r = res.route, hp = hosPrefs(), ap = apptStore(), off0 = HOS.offsetMin(r.departureTime) || 0, offs = [];
+    var appts = r.legs.map(function (l, i) { var o = HOS.offsetMin(l.arrivalTime); offs.push(o == null ? off0 : o); var v = ap[apptKey(i, l)]; return v ? HOS.localToMs(v, offs[i]) : null; });
+    var plan = HOS.plan({ legs: r.legs.map(function (l) { return { miles: l.miles, durationSec: l.durationSec, to: l.to }; }), departMs: Date.parse(r.departureTime) || Date.now(),
+      hoursUsed: hp.used, cycleHours: hp.cycle, dwellMin: hp.dwell, appts: appts });
+    plan.offs = offs; plan.off0 = off0; plan.prefs = hp; plan.apptLocal = r.legs.map(function (l, i) { return ap[apptKey(i, l)] || ''; });
+    return plan;
+  }
+  var EV_LABEL = { drive: 'Drive', break: '30-min break', rest: '10-h off duty', restart: '34-h restart', wait: 'Wait (appointment)', stop: 'On duty at stop' };
+  function renderHos() {
+    var res = state.lastResult, box = $('#hosPlan'); if (!res || !box) return;
+    var P = hosRun(res), hp = P.prefs, r = res.route;
+    var a = $('#hosArrive'); if (a) { a.textContent = fmtAt(P.arriveMs, P.offs[P.offs.length - 1]); $('#hosArriveTz').textContent = P.totals.breaks + ' break' + (P.totals.breaks === 1 ? '' : 's') + ', ' + P.totals.rests + ' rest' + (P.totals.rests === 1 ? '' : 's') + (P.totals.restarts ? ', ' + P.totals.restarts + ' restart' : ''); }
+    var h = '<h5>HOS planner</h5><div class="hosin">' +
+      '<label><b>Hours used</b><input type="number" id="hosUsed" min="0" max="70" step="0.5" value="' + hp.used + '"></label>' +
+      '<label><b>Cycle</b><select id="hosCycle"><option value="70"' + (+hp.cycle === 70 ? ' selected' : '') + '>70 h / 8 days</option><option value="60"' + (+hp.cycle === 60 ? ' selected' : '') + '>60 h / 7 days</option></select></label>' +
+      '<label><b>Min at stop</b><input type="number" id="hosDwell" min="0" max="600" step="15" value="' + hp.dwell + '"></label></div>';
+    h += '<table class="tbl hosstops"><thead><tr><th>Stop</th><th>Appointment</th><th class="n">HOS ETA</th><th class="n">Status</th></tr></thead><tbody>';
+    P.stops.forEach(function (st, i) {
+      var off = P.offs[i], cls = st.status === 'late' ? 'over' : st.status === 'tight' ? 'tight' : st.status ? 'ok' : '';
+      var txt = st.status === 'late' ? 'Late ' + C.formatDuration(st.lateMin * 60) : st.status === 'tight' ? 'Tight (' + st.waitMin + ' min early)' : st.status ? 'On time' + (st.waitMin ? ', ' + C.formatDuration(st.waitMin * 60) + ' early' : '') : '<span class="muted">—</span>';
+      h += '<tr><td><b>' + (i + 1) + '. ' + esc(short(st.label)) + '</b><div class="muted tiny">Mile ' + mi(st.mile) + ' · ' + esc(tzName(msIso(st.etaMs, off))) + '</div></td>' +
+        '<td><input type="datetime-local" class="appt" data-i="' + i + '" value="' + esc(P.apptLocal[i]) + '" aria-label="Appointment at stop ' + (i + 1) + ', local time"></td>' +
+        '<td class="n">' + fmtAt(st.etaMs, off) + '</td><td class="n"><span class="' + cls + '">' + txt + '</span></td></tr>';
+    });
+    h += '</tbody></table><table class="tbl hostl"><thead><tr><th>Start</th><th>Activity</th><th class="n">Mile</th><th class="n">Length</th></tr></thead><tbody>';
+    var legEnd = [], acc = 0; r.legs.forEach(function (l) { acc += l.miles; legEnd.push(acc); });
+    var runs = res.states || [];
+    var offAt = function (m, ms) {
+      for (var j = 0; j < runs.length; j++) if (runs[j].code && m >= runs[j].startMile - 0.5 && m <= runs[j].endMile + 0.5) { var so = HOS.stateOffset(runs[j].code, ms); if (so != null) return so; }
+      for (var k = 0; k < legEnd.length; k++) if (m <= legEnd[k] + 0.05) return P.offs[k]; return P.offs[P.offs.length - 1];
+    };
+    P.events.forEach(function (e) {
+      h += '<tr' + (e.type !== 'drive' ? ' class="hosoff"' : '') + '><td>' + fmtAt(e.start, e.mile0 < 0.5 ? P.off0 : offAt(e.mile0, e.start)) + '</td><td>' + (e.type === 'drive' ? '<b>Drive</b> ' + mi(e.mile1 - e.mile0) + ' mi' : esc(e.note || EV_LABEL[e.type])) +
+        '</td><td class="n">' + mi(e.mile0) + '</td><td class="n">' + C.formatDuration((e.end - e.start) / 1000) + '</td></tr>';
+    });
+    h += '</tbody></table><div class="tdisc">FMCSA property-carrying rules: 11 h driving, 14 h window, 30-min break after 8 h driving, 10 h off duty, ' + hp.cycle + ' h cycle (34 h restart). After this trip: ' +
+      P.driveLeftH + ' h driving left in the shift, ' + P.cycleLeftH + ' h left in the cycle. Appointments are local time at the stop. Planning aid only, not a log; traffic and stops change the times.</div>';
+    box.innerHTML = h;
+    var save = function () {
+      localStorage.setItem('zr.hos', JSON.stringify({ used: Math.max(0, Math.min(+$('#hosCycle').value, +$('#hosUsed').value || 0)), cycle: +$('#hosCycle').value, dwell: Math.max(0, +$('#hosDwell').value || 0) }));
+      renderHos();
+    };
+    ['#hosUsed', '#hosCycle', '#hosDwell'].forEach(function (id) { $(id).addEventListener('change', save); });
+    $$('input.appt', box).forEach(function (el) { el.addEventListener('change', function () {
+      var ap = apptStore(), i = +el.dataset.i, k = apptKey(i, r.legs[i]); if (el.value) ap[k] = el.value; else delete ap[k];
+      localStorage.setItem('zr.appts', JSON.stringify(ap)); renderHos();
+    }); });
   }
   // ---------- truck stops & fuel along the route (TomTom Search Along Route, cached) ----------
   function routeCoords(res) { var all = []; res.route.legs.forEach(function (l) { all = all.concat(l.coordinates || []); }); return all; }

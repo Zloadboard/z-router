@@ -51,6 +51,15 @@
     return l;
   }
 
+  /** Tab target after box `from` (v0.9.2). filled[i]: box i has text; last = End.
+   * Skip empty middle boxes; go to the next filled middle box, else End; -1 (Run Trip) when End is filled or from End. */
+  function nextTab(filled, from) {
+    var last = filled.length - 1;
+    if (from >= last) return -1;
+    for (var i = from + 1; i < last; i++) if (filled[i]) return i;
+    return filled[last] ? -1 : last;
+  }
+
   /** Remove an intermediate stop (Start/End rows are only cleared, never removed). */
   function removeAt(list, idx) {
     if (idx <= 0 || idx >= list.length - 1) { var c = list.slice(); c[idx] = null; return c; }
@@ -87,5 +96,5 @@
     return { pick: pick, move: o.isLast ? 'run' : 'next', prevent: true, wait: wait };
   }
 
-  return { MAX_STOPS: MAX_STOPS, pickIndex: pickIndex, keyAction: keyAction, isEmpty: isEmpty, move: move, insertIndex: insertIndex, dropTarget: dropTarget, toSlots: toSlots, append: append, insertBeforeEnd: insertBeforeEnd, removeAt: removeAt, reverse: reverse };
+  return { MAX_STOPS: MAX_STOPS, pickIndex: pickIndex, keyAction: keyAction, isEmpty: isEmpty, move: move, insertIndex: insertIndex, dropTarget: dropTarget, toSlots: toSlots, append: append, insertBeforeEnd: insertBeforeEnd, nextTab: nextTab, removeAt: removeAt, reverse: reverse };
 });

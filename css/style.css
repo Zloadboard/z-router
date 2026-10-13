@@ -126,6 +126,8 @@ input::placeholder{color:#6b7280}
 /* shared 3-column button grid: equal columns, 10px gaps, edges on the 14px content edges */
 .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--g);padding:0 var(--pad)}
 .grid3>.btn,.grid3>.rb{width:100%;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--g);padding:0 var(--pad)}
+.grid2>.btn{width:100%;min-width:0}
 .btnrow{margin-top:var(--g);padding-bottom:14px}
 #runRow{padding-bottom:0}
 #routeRow{margin-bottom:14px}

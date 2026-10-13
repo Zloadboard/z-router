@@ -190,7 +190,7 @@
     box.innerHTML = '';
     WP_DEFS.forEach(function (d, idx) {
       var row = document.createElement('div');
-      row.className = 'wp-row ' + d.role;
+      row.className = 'wp-row ' + d.role + (d.role === 'stop' ? ' shown' : ''); // v0.9.2: all 7 boxes always show
       row.dataset.role = d.role; row.dataset.idx = idx;
       var ph = d.role === 'start' ? 'Start: address, city, ZIP or lat,lng' : d.role === 'end' ? 'Destination: address, city or ZIP' : d.label + ': address, city or ZIP';
       // The grip and the remove (x) button are out of the Tab order (tabindex="-1") so Tab goes stop input -> next stop input -> Run Trip.
@@ -230,8 +230,14 @@
   function isLastRow(row) { var rows = visibleRows(); return rows.indexOf(row) === rows.length - 1; }
   /** Keyboard flow: after a stop input go to the next visible stop input, or to Run Trip from the last one. */
   function focusAfter(row, move) {
-    var rows = visibleRows(), next = move === 'run' ? null : rows[rows.indexOf(row) + 1];
+    var rows = visibleRows(), next = move === 'run' ? null : nextTabRow(row);
     if (next) $('input', next).focus(); else $('#runBtn').focus();
+  }
+  /** v0.9.2 Tab order: skip empty middle boxes; the next filled middle box or End; Run Trip when End is filled. */
+  function nextTabRow(row) {
+    var rows = visibleRows(), vals = rows.map(function (r) { return !!$('input', r).value.trim(); });
+    var k = S.nextTab(vals, rows.indexOf(row));
+    return k < 0 ? null : rows[k];
   }
   function rowValue(row) {
     var inp = $('input', row), label = inp.value;
@@ -253,7 +259,6 @@
     putValue(wpRow(0), s.start);
     for (var k = 1; k < last; k++) {
       var row = wpRow(k), has = k - 1 < s.stops.length;
-      row.classList.toggle('shown', has);
       putValue(row, has ? s.stops[k - 1] : null);
     }
     putValue(wpRow(last), s.end);
@@ -261,9 +266,6 @@
     drawPlanMarkers(null);
   }
   function updateAddStop() {
-    var free = S.MAX_STOPS - $$('#waypoints .wp-row.stop.shown').length;
-    $('#addStop').disabled = free <= 0;
-    $('#addStop').title = free > 0 ? 'Add a stop above End (' + free + ' left)' : 'Up to ' + S.MAX_STOPS + ' stops';
     var rows = visibleRows();
     rows.forEach(function (r, i) {
       var b = $('.badge', r), last = i === rows.length - 1;
@@ -271,14 +273,11 @@
       $('.wl', r).textContent = i === 0 ? 'Start' : last ? 'End' : 'Stop ' + i;
     });
   }
-  /** "Add stop": a new empty stop box between the last stop and End (End stays End). */
-  function addStopRow(focus) {
-    var list = readStopList();
-    if (list.length - 2 >= S.MAX_STOPS) return null;
-    writeStopList(S.insertBeforeEnd(list));
-    var rows = visibleRows(), row = rows[rows.length - 2];
-    if (focus) $('input', row).focus();
-    return row;
+  /** v0.9.2: no Add stop button (all 7 boxes show); focuses the first empty middle box. */
+  function addStopRow(focus) { // kept for older callers: focuses the first empty middle box
+    var free = $$('#waypoints .wp-row.stop').filter(function (r) { return !$('input', r).value.trim(); })[0];
+    if (free && focus) $('input', free).focus();
+    return free || null;
   }
   function setWaypoint(idx, item) {
     var row = wpRow(idx); if (!row) return;
@@ -1702,7 +1701,6 @@
     $('#resetBtn2').addEventListener('click', resetTrip);
     $('#backBtn').addEventListener('click', function () { showView('plan'); });
     $('#setToggle').addEventListener('click', function () { setSettingsOpen($('#setBody').classList.contains('hidden')); });
-    $('#addStop').addEventListener('click', function () { addStopRow(true); });
     $$('#routeTypeSeg button').forEach(function (b) { b.addEventListener('click', function () { setRouteType(b.dataset.v); saveSettings(); updateSummaries(); }); });
     $$('#reportGrid .rb').forEach(function (b) { b.addEventListener('click', function () { openReport(b.dataset.report); }); });
     $('#detailsClose').addEventListener('click', closeDetails);

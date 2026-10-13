@@ -5,7 +5,7 @@
 (function () {
   'use strict';
   var R = window.ZRLib.require;
-  var tomtom = R('tomtom'), common = R('./common'), calc = R('../public/js/calc'), tandem = R('tandem'), states = R('states');
+  var tomtom = R('tomtom'), common = R('./common'), calc = R('../public/js/calc'), tandem = R('tandem'), states = R('states'), tolls = R('tolls');
   var KEY = String((window.ZR_CONFIG && window.ZR_CONFIG.tomtomKey) || '').trim();
   var TRUCK_TYPES = [{"id":"semi","label":"Truck Semi"},{"id":"double","label":"Semi w/ Double Trailer"},{"id":"triple","label":"Semi w/ Triple Trailer"},{"id":"bobtail","label":"Bobtail (Tractor only)"},{"id":"straight","label":"Straight Truck"},{"id":"straightTrailer","label":"Straight Truck w/ Trailer"},{"id":"light","label":"Light Truck / Cargo Van"}];
   var TIMEOUT_MS = 30000;
@@ -62,7 +62,13 @@
   }
 
   // ---------- data files (static) ----------
-  var rulesP = null, statesP = null;
+  var rulesP = null, statesP = null, tollP = null;
+  function loadTollRates() {
+    if (!tollP) tollP = realFetch('data/toll-rates.json').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) { if (!j || !Array.isArray(j.roads) || !j.axleFactors) throw new Error('bad format'); return j; })
+      .catch(function (e) { tollP = null; throw e; });
+    return tollP;
+  }
   function loadTandemRules() {
     if (!rulesP) rulesP = realFetch('data/tandem-rules.json').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (j) { var res = tandem.normalizeRules(j); if (res.ok && res.data.fixture) res = { ok: false, data: null, error: 'tandem rules data not loaded (file is a test fixture, not real data)' }; return res; })
@@ -143,9 +149,17 @@
       var ordered = order.map(function (i) { return points[i]; });
       var route = tomtom.normalizeRoute(json, { waypoints: ordered, prefs: prefs });
       warnings.push.apply(warnings, tomtom.preferenceWarnings(prefs, truck));
-      if (route.tolls.sections) warnings.push('Toll cost not available from TomTom: route has ' + route.tolls.sections + ' toll section(s), about ' + route.tolls.miles + ' toll miles. Toll cost is not included in the total.');
-      if (prefs.avoidTolls && route.tolls.sections) warnings.push('Avoid Toll Roads was on, but TomTom still used toll roads for part of this trip.');
-      return { route: route, order: order, reordered: reordered, requestParams: req.params, profile: req.profile, effectiveSettings: route.effectiveSettings };
+      var done = function () {
+        if (prefs.avoidTolls && route.tolls.sections) warnings.push('Avoid Toll Roads was on, but TomTom still used toll roads for part of this trip.');
+        return { route: route, order: order, reordered: reordered, requestParams: req.params, profile: req.profile, effectiveSettings: route.effectiveSettings };
+      };
+      if (!route.tolls.sections) return done();
+      return Promise.all([loadStates(), loadTollRates()]).then(function (res) {
+        tolls.applyToRoute(route, tolls.estimate(route._tollRaw, { rates: res[1], axles: truck.axleCount, stateAt: states.stateAt }), res[1]);
+        warnings.push('Tolls are an estimate: ' + route.tolls.sections + ' toll section(s), about ' + route.tolls.miles + ' toll miles, ~$' + Math.round(route.tolls.total) + ' at average per-mile truck rates (tag vs cash may differ).');
+      }).catch(function (e) {
+        warnings.push('Toll cost not available (toll rates not loaded: ' + e.message + '): route has ' + route.tolls.sections + ' toll section(s), about ' + route.tolls.miles + ' toll miles. Toll cost is not included in the total.');
+      }).then(done);
     });
   }
   function planTrip(body) {

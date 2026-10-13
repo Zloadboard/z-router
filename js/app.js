@@ -438,7 +438,8 @@
     var html = esc(cfg.providerLabel) + ': ';
     if (partial.length) html += esc(partial.join(', ')) + ' only partly supported. ';
     if (none.length) html += esc(none.join(', ')) + ' not supported (ignored). ';
-    if (caps.tolls && caps.tolls.support !== 'full') html += 'No toll prices (toll miles shown instead). ';
+    if (caps.tolls && caps.tolls.support === 'estimate') html += 'Toll cost is estimated from average per-mile truck rates. ';
+    else if (caps.tolls && caps.tolls.support !== 'full') html += 'No toll prices (toll miles shown instead). ';
     note.innerHTML = html + 'Hover an option for details.';
     note.classList.remove('hidden');
   }
@@ -866,7 +867,7 @@
   function renderSummary(res) {
     var r = res.route, t = r.totals, c = res.costs, ec = res.economics, pl = res.providerLabel || 'the provider';
     var run = state.runInputs || { truck: readTruck(), summary: truckSummary(), vehicle: vehicleText() }, tk = run.truck;
-    var noToll = r.tolls.available === false;
+    var noToll = r.tolls.available === false, estToll = !noToll && r.tolls.estimated && r.tolls.items.some(function (x) { return x.road; });
     var HR = '<tr class="sep"><td colspan="5"><div></div></td></tr>'; // divider rows: content rows stay exactly 28px
     var rowsHtml = '<tr><td class="i">' + ICON('truck') + '</td><td class="l">Vehicle</td><td class="v" colspan="3" title="' + esc(run.summary) + '">' + esc(run.vehicle) + '</td></tr>' + HR;
     var cumMi = 0, cumSec = 0, n = res.waypoints.length;
@@ -888,14 +889,15 @@
     set('resDist', mi1(t.miles) + ' miles', r.legs.length + (r.legs.length === 1 ? ' leg' : ' legs'));
     set('resTime', longDur(t.durationSec), 'Total time including traffic' + (t.trafficDelaySec > 60 ? ' (' + C.formatDuration(t.trafficDelaySec) + ' traffic delay)' : ''));
     set('resDrive', longDur(base), 'Driving time with free-flowing traffic');
-    set('resTolls', noToll ? 'n/a*' : money(r.tolls.total) + (r.tolls.estimated ? '*' : ''), noToll ? mi(r.tolls.miles || 0, 1) + ' toll miles; no toll prices from ' + pl : '');
+    set('resTolls', noToll ? 'n/a*' : estToll ? (r.tolls.total > 0 ? '~' + money(r.tolls.total, 0) + ' est.' : '$0') : money(r.tolls.total) + (r.tolls.estimated ? '*' : ''),
+      noToll ? mi(r.tolls.miles || 0, 1) + ' toll miles; no toll prices from ' + pl : estToll ? 'Estimate: ' + mi(r.tolls.miles || 0, 1) + ' toll mi at average per-mile truck rates (' + (r.tolls.axles || 5) + ' axles); see the Tolls & warnings report' : '');
     set('resFuel', money(c.fuelCost), c.gallons + ' gal × ' + money(+tk.fuelPrice || 0) + '/gal');
     set('resFixed', money(c.mileageCost + (c.hourlyCost || 0)), mi(c.miles, 1) + ' mi × ' + money(+tk.costPerMile || 0) + (c.hourlyCost ? ' + ' + c.hours + ' h × ' + money(+tk.costPerHour || 0) : '') + ' (per-mile + per-hour cost)');
     set('resTotal', money(c.totalCost), '$' + c.totalPerMile.toFixed(2) + '/mi' + (noToll ? ', excluding tolls' : ''));
     var pf = $('#resProfit');
     pf.classList.toggle('hidden', !ec);
     if (ec) { pf.className = 'xline ' + (ec.profit >= 0 ? 'pos' : 'red'); pf.innerHTML = ICON('chart') + '<span>Net profit ' + money(ec.profit) + '</span>'; pf.title = ec.margin + '% margin · $' + ec.ratePerMile.toFixed(2) + '/mi rate (Load Economics report)'; }
-    $('#resNote').textContent = noToll ? '* ' + pl + ' has no toll prices (' + mi(r.tolls.miles || 0, 1) + ' toll mi); Total excludes tolls.' : r.tolls.estimated ? '* Toll cost is an estimate.' : '';
+    $('#resNote').textContent = noToll ? '* ' + pl + ' has no toll prices (' + mi(r.tolls.miles || 0, 1) + ' toll mi); Total excludes tolls.' : estToll ? (r.tolls.total > 0 ? '* Toll estimate: ' + mi(r.tolls.miles || 0, 0) + ' toll mi at avg truck rates; cash may differ.' : '') : r.tolls.estimated ? '* Toll cost is an estimate.' : '';
     renderAlertLine(res);
   }
   /** The one red "Tandems: slide to ≤ 40′11″ before IN" line (only when the setting breaks a state rule on the route). */
@@ -959,7 +961,7 @@
       else li('Tandems', 'Check: ' + esc(ev.altRules.map(function (a) { return a.text; }).concat(ev.unknown.length ? ['no/uncertain data for ' + ev.unknown.join(', ')] : []).join(' ')));
     }
     li('Tolls', r.tolls.available === false ? mi(r.tolls.miles || 0, 1) + ' toll mi in ' + (r.tolls.sections || 0) + ' section(s) · <span class="muted">cost not available from ' + esc(res.providerLabel) + ', not in trip cost</span>'
-      : r.tolls.total ? money(r.tolls.total) + (r.tolls.estimated ? ' (estimated)' : '') : 'None');
+      : r.tolls.total ? (r.tolls.estimated ? '~' + money(r.tolls.total, 0) + ' estimated · ' + mi(r.tolls.miles || 0, 1) + ' toll mi' : money(r.tolls.total)) : 'None');
     if (res.reordered) li('Stop order', 'Re-ordered for the best sequence (' + (res.provider === 'tomtom' ? 'TomTom computeBestOrder' : 'HERE Waypoints Sequence') + ')');
     var nn = r.notices.length + (res.warnings || []).length;
     li('Notices', nn ? nn + ' (see the Tolls &amp; warnings report)' : 'None');
@@ -1018,15 +1020,27 @@
     }
     html += sec('directions', dr + '</div>');
     // Tolls & warnings
-    var tw = '<div class="dsec"><h5>Tolls</h5><table class="tbl"><tbody>' +
-      (noToll ? row3('Toll roads', mi(r.tolls.miles || 0, 1) + ' toll mi in ' + (r.tolls.sections || 0) + ' section(s)', 'n/a') +
-        '<tr><td colspan="3" class="muted">Toll cost is not available from ' + pl + ', so it is not in the trip cost.</td></tr>'
-        : row3('Toll cost', r.tolls.items.length + ' item(s)' + (r.tolls.estimated ? ', estimated' : ''), money(r.tolls.total)));
-    r.tolls.items.forEach(function (ti) {
-      tw += row3('Leg ' + ((ti.leg || 0) + 1) + ': ' + esc(ti.system), esc((ti.paymentMethods || []).join(', ') || (noToll ? 'payment types not reported' : '')),
-        noToll ? fmtMiles(ti.miles) : money(ti.price) + (ti.maxPrice ? '–' + money(ti.maxPrice) : ''));
-    });
-    tw += '</tbody></table></div>';
+    var tw;
+    if (!noToll && r.tolls.estimated && r.tolls.items.some(function (x) { return x.road; })) {
+      tw = '<div class="dsec"><h5>Tolls (estimate, ' + (r.tolls.axles || 5) + ' axles)</h5><table class="tbl tolls"><thead><tr><th>Toll road</th><th>State</th><th class="n">Miles</th><th class="n">Rate/mi</th><th class="n">Est.</th></tr></thead><tbody>';
+      r.tolls.items.forEach(function (ti) {
+        var src = (ti.sources || [])[0];
+        tw += '<tr title="' + esc((ti.confidence ? ti.confidence + ' rate' : '') + (src ? ' · ' + src : '')) + '"><td>' + (r.legs.length > 1 ? 'Leg ' + ((ti.leg || 0) + 1) + ': ' : '') + esc(ti.road) +
+          '</td><td>' + esc(ti.state || '–') + '</td><td class="n">' + mi(ti.miles, 1) + '</td><td class="n">' + (ti.basis === 'flat' ? 'flat' : '$' + (+ti.ratePerMile).toFixed(3)) + '</td><td class="n">' + money(ti.est) + '</td></tr>';
+      });
+      tw += '</tbody><tfoot><tr><td>Total</td><td></td><td class="n">' + mi(r.tolls.items.reduce(function (s2, x) { return s2 + (x.miles || 0); }, 0), 1) + '</td><td></td><td class="n">~' + money(r.tolls.total) + '</td></tr></tfoot></table>' +
+        '<div class="tdisc">Estimate only: TomTom toll sections priced at average 5-axle per-mile rates (electronic tag) from each agency\'s published schedule, scaled for axle count. Cash / toll-by-plate, time of day, exact exits and tag state may differ. Rates checked ' + esc(r.tolls.ratesChecked || '') + '.</div></div>';
+    } else {
+      tw = '<div class="dsec"><h5>Tolls</h5><table class="tbl"><tbody>' +
+        (noToll ? row3('Toll roads', mi(r.tolls.miles || 0, 1) + ' toll mi in ' + (r.tolls.sections || 0) + ' section(s)', 'n/a') +
+          '<tr><td colspan="3" class="muted">Toll cost is not available from ' + pl + ', so it is not in the trip cost.</td></tr>'
+          : row3('Toll cost', r.tolls.items.length + ' item(s)' + (r.tolls.estimated ? ', estimated' : ''), money(r.tolls.total)));
+      r.tolls.items.forEach(function (ti) {
+        tw += row3('Leg ' + ((ti.leg || 0) + 1) + ': ' + esc(ti.system), esc((ti.paymentMethods || []).join(', ') || (noToll ? 'payment types not reported' : '')),
+          noToll ? fmtMiles(ti.miles) : money(ti.price) + (ti.maxPrice ? '–' + money(ti.maxPrice) : ''));
+      });
+      tw += '</tbody></table></div>';
+    }
     var warn = (res.warnings || []).map(function (w) { return { severity: 'info', title: w, details: [] }; });
     var all = r.notices.concat(warn);
     tw += '<div class="dsec" id="noticeSection"><h5>Restrictions &amp; notices (' + all.length + ')</h5>';
@@ -1042,7 +1056,7 @@
       row3('Fuel', c.gallons + ' gal × ' + money(+tk.fuelPrice || 0) + '/gal', money(c.fuelCost)) +
       row3('Per mile', mi(c.miles, 1) + ' mi × ' + money(+tk.costPerMile || 0), money(c.mileageCost)) +
       row3('Per hour', c.hours + ' h × ' + money(+tk.costPerHour || 0), money(c.hourlyCost)) +
-      (noToll ? row3('Tolls', 'not available from ' + pl, 'not incl.') : row3('Tolls', r.tolls.items.length + ' item(s)' + (r.tolls.estimated ? ', estimated' : ''), money(r.tolls.total))) +
+      (noToll ? row3('Tolls', 'not available from ' + pl, 'not incl.') : row3('Tolls', r.tolls.items.length + ' item(s)' + (r.tolls.estimated ? ', estimate (' + mi(r.tolls.miles || 0, 1) + ' toll mi)' : ''), money(r.tolls.total))) +
       '</tbody><tfoot>' + row3('Trip cost', money(c.totalPerMile) + '/mi', money(c.totalCost));
     if (res.economics) {
       var ec = res.economics;

@@ -236,6 +236,11 @@
         if (!KEY) return reply(503, { ok: false, code: 'API_KEY_MISSING', error: KEY_MISSING });
         return geocode(g).then(function (item) { return item ? reply(200, { ok: true, item: item }) : reply(404, { ok: false, code: 'NOT_FOUND', error: 'No match for "' + g + '"' }); });
       }
+      if (p === '/api/diesel') { // eia.gov sends no CORS headers, so the static site uses the snapshot bundled at build time
+        return realFetch('data/eia-diesel.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+          return d && d.prices ? reply(200, Object.assign({ ok: true, live: false }, d)) : reply(503, { ok: false, error: 'EIA diesel prices not available' });
+        });
+      }
       if (p === '/api/stops-along') {
         if (method !== 'POST') return reply(405, { ok: false, error: 'Use POST' });
         if (!KEY) return reply(503, { ok: false, code: 'API_KEY_MISSING', error: KEY_MISSING });

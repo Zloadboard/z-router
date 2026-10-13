@@ -36,7 +36,7 @@
 <!-- map controls (over the map, below the top bar) -->
 <div class="mapctl">
   <div class="mc seg"><button type="button" class="view-btn on" data-view="map">Map</button><button type="button" class="view-btn" data-view="terrain">Terrain</button><button type="button" class="view-btn" data-view="satellite">Satellite</button></div>
-  <div class="mc seg"><button type="button" id="tollLayerBtn" class="on" aria-pressed="true" title="Show / hide expensive toll roads (5-axle $/mile estimate)">Tolls</button></div>
+  <div class="mc seg"><button type="button" id="tollLayerBtn" class="on" aria-pressed="true" title="Show / hide expensive toll roads (5-axle $/mile estimate)">Tolls</button><button type="button" id="restLayerBtn" aria-pressed="false" title="Show / hide rest areas and service plazas (OpenStreetMap; truck parking where tagged)">Rest areas</button></div>
   <div class="mc"><button type="button" id="fitBtn" title="Fit route"><i data-i="expand"></i></button></div>
 </div>
 <div id="keyBanner" class="banner hidden"></div>
@@ -119,6 +119,7 @@
           <label><span>Load rate</span><span class="in"><em>$</em><input id="loadRate" name="loadRate" placeholder="0" inputmode="decimal" aria-label="Load rate"></span></label>
           <label><span>MPG</span><span class="in"><input id="mpg" name="mpg" value="6.5" inputmode="decimal" aria-label="MPG"></span></label>
           <label><span>Fuel price</span><span class="in"><em>$</em><input id="fuelPrice" name="fuelPrice" value="3.80" inputmode="decimal" aria-label="Fuel price per gallon"><em>/gal</em></span></label>
+          <label><span>Fuel source</span><span class="in"><select id="fuelSrc" name="fuelSrc" aria-label="Fuel price source" title="EIA weekly avg: after each trip, set the fuel price to the U.S. EIA weekly on-highway diesel average for the route's regions"><option value="manual">Manual price</option><option value="eia">Use EIA price</option></select></span></label>
           <label><span>Fuel type</span><span class="in"><select name="fuel" aria-label="Fuel type"><option value="diesel">Diesel</option><option value="gasoline">Gasoline</option></select></span></label>
           <label><span>Per mile</span><span class="in"><em>$</em><input id="costPerMile" name="costPerMile" value="0.80" inputmode="decimal" aria-label="Cost per mile"><em>/mi</em></span></label>
           <label><span>Per hour</span><span class="in"><em>$</em><input id="costPerHour" name="costPerHour" value="0" inputmode="decimal" aria-label="Cost per hour"><em>/hr</em></span></label>
@@ -195,6 +196,7 @@
 <script src="js/stops.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/ifta.js"></script>
+<script src="js/eia.js"></script>
 <script src="js/hos.js"></script>
 <script src="js/trips.js"></script>
 <script src="vendor/qrcode-generator.js"></script>

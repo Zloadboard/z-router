@@ -1,0 +1,244 @@
+{
+ "source": "IFTA, Inc. tax rate matrix (https://www.iftach.org/taxmatrix4/Taxmatrix.php)",
+ "quarter": "4Q2026",
+ "status": "Provisional rates as of 10/13/2026 (final after Dec 4, 2026)",
+ "units": "US $ per US gallon, special diesel; Canadian rates converted by IFTA",
+ "note": "Estimate only. Net IFTA owed depends on where fuel was bought (tax paid at the pump is credited).",
+ "rates": {
+  "AB": {
+   "name": "Alberta",
+   "diesel": 0.3509
+  },
+  "AL": {
+   "name": "Alabama",
+   "diesel": 0.31
+  },
+  "AR": {
+   "name": "Arkansas",
+   "diesel": 0.285
+  },
+  "AZ": {
+   "name": "Arizona",
+   "diesel": 0.26
+  },
+  "BC": {
+   "name": "British Columbia",
+   "diesel": 0.4049
+  },
+  "CA": {
+   "name": "California",
+   "diesel": 0.979
+  },
+  "CO": {
+   "name": "Colorado",
+   "diesel": 0.335
+  },
+  "CT": {
+   "name": "Connecticut",
+   "diesel": 0.499
+  },
+  "DE": {
+   "name": "Delaware",
+   "diesel": 0.22
+  },
+  "FL": {
+   "name": "Florida",
+   "diesel": 0.4097
+  },
+  "GA": {
+   "name": "Georgia",
+   "diesel": 0.373
+  },
+  "IA": {
+   "name": "Iowa",
+   "diesel": 0.325
+  },
+  "ID": {
+   "name": "Idaho",
+   "diesel": 0.32
+  },
+  "IL": {
+   "name": "Illinois",
+   "diesel": 0.738
+  },
+  "IN": {
+   "name": "Indiana",
+   "diesel": 0.63
+  },
+  "KS": {
+   "name": "Kansas",
+   "diesel": 0.26
+  },
+  "KY": {
+   "name": "Kentucky",
+   "diesel": 0.325,
+   "note": "0.22 + 0.105 surcharge"
+  },
+  "LA": {
+   "name": "Louisiana",
+   "diesel": 0.2
+  },
+  "MA": {
+   "name": "Massachusetts",
+   "diesel": 0.24
+  },
+  "MB": {
+   "name": "Manitoba",
+   "diesel": 0.3374
+  },
+  "MD": {
+   "name": "Maryland",
+   "diesel": 0.4745
+  },
+  "ME": {
+   "name": "Maine",
+   "diesel": 0.312
+  },
+  "MI": {
+   "name": "Michigan",
+   "diesel": 0.524
+  },
+  "MN": {
+   "name": "Minnesota",
+   "diesel": 0.326
+  },
+  "MO": {
+   "name": "Missouri",
+   "diesel": 0.295
+  },
+  "MS": {
+   "name": "Mississippi",
+   "diesel": 0.24
+  },
+  "MT": {
+   "name": "Montana",
+   "diesel": 0.2975
+  },
+  "NB": {
+   "name": "New Brunswick",
+   "diesel": 0.417
+  },
+  "NC": {
+   "name": "North Carolina",
+   "diesel": 0.41
+  },
+  "ND": {
+   "name": "North Dakota",
+   "diesel": 0.23
+  },
+  "NE": {
+   "name": "Nebraska",
+   "diesel": 0.318
+  },
+  "NH": {
+   "name": "New Hampshire",
+   "diesel": 0.222
+  },
+  "NJ": {
+   "name": "New Jersey",
+   "diesel": 0.561
+  },
+  "NL": {
+   "name": "Newfoundland",
+   "diesel": 0.2564
+  },
+  "NM": {
+   "name": "New Mexico",
+   "diesel": 0.21
+  },
+  "NS": {
+   "name": "Nova Scotia",
+   "diesel": 0.4157
+  },
+  "NV": {
+   "name": "Nevada",
+   "diesel": 0.27
+  },
+  "NY": {
+   "name": "New York",
+   "diesel": 0.3805
+  },
+  "OH": {
+   "name": "Ohio",
+   "diesel": 0.47
+  },
+  "OK": {
+   "name": "Oklahoma",
+   "diesel": 0.19
+  },
+  "ON": {
+   "name": "Ontario",
+   "diesel": 0.243
+  },
+  "OR": {
+   "name": "Oregon",
+   "diesel": null,
+   "note": "No IFTA diesel tax: Oregon uses a weight-mile tax instead (reported separately)."
+  },
+  "PA": {
+   "name": "Pennsylvania",
+   "diesel": 0.741
+  },
+  "PE": {
+   "name": "Prince Edward Island",
+   "diesel": 0.3819
+  },
+  "QC": {
+   "name": "Quebec",
+   "diesel": 0.5452
+  },
+  "RI": {
+   "name": "Rhode Island",
+   "diesel": 0.4
+  },
+  "SC": {
+   "name": "South Carolina",
+   "diesel": 0.28
+  },
+  "SD": {
+   "name": "South Dakota",
+   "diesel": 0.28
+  },
+  "SK": {
+   "name": "Saskatchewan",
+   "diesel": 0.4049
+  },
+  "TN": {
+   "name": "Tennessee",
+   "diesel": 0.27
+  },
+  "TX": {
+   "name": "Texas",
+   "diesel": 0.2
+  },
+  "UT": {
+   "name": "Utah",
+   "diesel": 0.379
+  },
+  "VA": {
+   "name": "Virginia",
+   "diesel": 0.479,
+   "note": "0.336 + 0.143 surcharge"
+  },
+  "VT": {
+   "name": "Vermont",
+   "diesel": 0.31
+  },
+  "WA": {
+   "name": "Washington",
+   "diesel": 0.595
+  },
+  "WI": {
+   "name": "Wisconsin",
+   "diesel": 0.329
+  },
+  "WV": {
+   "name": "West Virginia",
+   "diesel": 0.357
+  },
+  "WY": {
+   "name": "Wyoming",
+   "diesel": 0.24
+  }
+ }
+}

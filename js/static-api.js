@@ -5,7 +5,8 @@
 (function () {
   'use strict';
   var R = window.ZRLib.require;
-  var tomtom = R('tomtom'), common = R('./common'), calc = R('../public/js/calc'), tandem = R('tandem'), states = R('states'), tolls = R('tolls');
+  var tomtom = R('tomtom'), common = R('./common'), calc = R('../public/js/calc'), tandem = R('tandem'), states = R('states'), tolls = R('tolls'), along = R('along');
+  var stopsCache = {};
   var KEY = String((window.ZR_CONFIG && window.ZR_CONFIG.tomtomKey) || '').trim();
   var TRUCK_TYPES = [{"id":"semi","label":"Truck Semi"},{"id":"double","label":"Semi w/ Double Trailer"},{"id":"triple","label":"Semi w/ Triple Trailer"},{"id":"bobtail","label":"Bobtail (Tractor only)"},{"id":"straight","label":"Straight Truck"},{"id":"straightTrailer","label":"Straight Truck w/ Trailer"},{"id":"light","label":"Light Truck / Cargo Van"}];
   var TIMEOUT_MS = 30000;
@@ -15,14 +16,16 @@
   var keyCheck = { status: 'unchecked', message: null }, keyCheckP = null;
 
   function ProviderError(msg, status, code, details) { var e = new Error(msg); e.status = status; e.code = code; e.details = details; return e; }
-  function withTimeout(url) {
-    if (window.AbortSignal && AbortSignal.timeout) return realFetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { Accept: 'application/json' } });
-    return realFetch(url, { headers: { Accept: 'application/json' } });
+  function withTimeout(url, init) {
+    var o = { headers: { Accept: 'application/json' } };
+    if (init && init.body) { o.method = 'POST'; o.body = init.body; o.headers['Content-Type'] = 'application/json'; }
+    if (window.AbortSignal && AbortSignal.timeout) o.signal = AbortSignal.timeout(TIMEOUT_MS);
+    return realFetch(url, o);
   }
-  function providerGet(baseUrl, params) {
+  function providerGet(baseUrl, params, init) {
     if (!KEY) return Promise.reject(ProviderError(KEY_MISSING, 503, 'API_KEY_MISSING'));
     var q = new URLSearchParams(params); q.set('key', KEY);
-    return withTimeout(baseUrl + '?' + q.toString()).catch(function (e) {
+    return withTimeout(baseUrl + '?' + q.toString(), init).catch(function (e) {
       throw ProviderError('Could not reach TomTom (' + (e.name === 'TimeoutError' ? 'timeout' : 'network error') + '). If the TomTom key is limited to certain domains, ' + location.hostname + ' must be on its list.', 502, 'PROVIDER_UNREACHABLE');
     }).then(function (res) {
       return res.text().then(function (text) {
@@ -232,6 +235,17 @@
         if (ll) return reply(200, { ok: true, item: { label: g, lat: ll.lat, lng: ll.lng } });
         if (!KEY) return reply(503, { ok: false, code: 'API_KEY_MISSING', error: KEY_MISSING });
         return geocode(g).then(function (item) { return item ? reply(200, { ok: true, item: item }) : reply(404, { ok: false, code: 'NOT_FOUND', error: 'No match for "' + g + '"' }); });
+      }
+      if (p === '/api/stops-along') {
+        if (method !== 'POST') return reply(405, { ok: false, error: 'Use POST' });
+        if (!KEY) return reply(503, { ok: false, code: 'API_KEY_MISSING', error: KEY_MISSING });
+        var sb = {}; try { sb = JSON.parse((opts && opts.body) || '{}'); } catch (e) { throw new common.InputError('Invalid JSON body'); }
+        var coords = Array.isArray(sb.coords) ? sb.coords.filter(function (c) { return Array.isArray(c) && common.validLatLng({ lat: c[0], lng: c[1] }); }).slice(0, 5000) : [];
+        if (coords.length < 2) throw new common.InputError('Run a trip first (no route geometry).');
+        var sk = along.routeKey(coords, sb.totalMiles);
+        if (stopsCache[sk]) return reply(200, { ok: true, items: stopsCache[sk].items, calls: 0, cached: true });
+        return along.findAlong(coords, +sb.totalMiles || null, function (u2, params, b) { return providerGet(u2, params, { body: b }); })
+          .then(function (r) { stopsCache[sk] = r; return reply(200, { ok: true, items: r.items, calls: r.calls, cached: false }); });
       }
       if (p === '/api/route') {
         if (method !== 'POST') return reply(405, { ok: false, error: 'Use POST' });

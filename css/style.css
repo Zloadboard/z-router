@@ -343,3 +343,9 @@ details.inline summary{color:#000;font-size:12px}
   .dbar{background:#fff;color:#000;height:auto;padding:0}
   .dbar h4,#drawerIcon{display:none}
 }
+/* truck stops along the route */
+.fuel-marker{width:20px;height:20px;border-radius:50%;background:#0b6e3a;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);display:grid;place-items:center;color:#fff}
+.fuel-marker svg{width:12px;height:12px;fill:#fff}
+.fuel-marker.rest{background:#1f4e9c}
+.tbl.stops tr.clk{cursor:pointer}
+.tbl.stops tr.clk:hover td{background:#f3f6fa}

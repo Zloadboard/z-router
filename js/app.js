@@ -660,6 +660,7 @@
     state.routeLayer = L.layerGroup().addTo(map);
     state.markerLayer = L.layerGroup().addTo(map);
     state.warnLayer = L.layerGroup().addTo(map);
+    state.stopsLayer = L.layerGroup().addTo(map);
     state.actionLayer = L.layerGroup().addTo(map);
     setView('map');
     $$('.view-btn').forEach(function (b) { b.addEventListener('click', function () { setView(b.dataset.view); }); });
@@ -775,7 +776,7 @@
     state.map.fitBounds(b, { paddingTopLeft: [40, 60], paddingBottomRight: [dw + 40, 36] });
   }
   function clearRoute() {
-    state.routeLayer.clearLayers(); state.markerLayer.clearLayers(); state.warnLayer.clearLayers(); state.actionLayer.clearLayers();
+    state.routeLayer.clearLayers(); state.markerLayer.clearLayers(); state.warnLayer.clearLayers(); state.actionLayer.clearLayers(); state.stopsLayer.clearLayers(); state.stopsShown = null;
     state.lastResult = null;
   }
   /** Point at `mile` along the route polyline (scaled to the provider's total miles). */
@@ -980,7 +981,7 @@
   // ---------- report panel (docked over the map) ----------
   var REPORTS = { legs: ['list', 'Legs itinerary'], states: ['map', 'State mileage'], tandem: ['axle', 'Tandem rules on this route'],
     directions: ['turn', 'Turn-by-turn directions'], tolls: ['warn', 'Tolls & warnings'], costs: ['receipt', 'Load economics'],
-    settings: ['sliders', 'Trip settings'], note: ['note', 'Driver note'], full: ['print', 'Full trip report'] };
+    settings: ['sliders', 'Trip settings'], note: ['note', 'Driver note'], stops: ['fuel', 'Truck stops & fuel along the route'], ifta: ['receipt', 'IFTA estimate'], full: ['print', 'Full trip report'] };
   function openReport(id) {
     if (!state.lastResult) { toast('Run a trip first'); return; }
     if (id === 'print') id = 'full';
@@ -993,6 +994,8 @@
     dr.classList.remove('hidden');
     $('#resDetails').scrollTop = 0;
     $$('#reportGrid .rb').forEach(function (b) { b.classList.toggle('on', b.dataset.report === id); b.setAttribute('aria-pressed', b.dataset.report === id ? 'true' : 'false'); });
+    if (id === 'stops' || id === 'full') loadStopsAlong();
+    if (id === 'ifta' || id === 'full') loadIfta();
     if (was) fitRoute();
   }
   /** Show the chosen report; "full" shows every report one after another (that is also what Print prints). */
@@ -1135,6 +1138,8 @@
     co = econCells(res) + co;
     html += sec('costs', co);
     html += sec('settings', settingsReport(res));
+    html += sec('stops', '<div class="dsec" id="stopsAlong"><div class="muted">Open this report to find truck stops and fuel along the route.</div></div>');
+    html += sec('ifta', '<div class="dsec" id="iftaRep">' + iftaHtml(res) + '</div>');
     // Driver note
     html += sec('note', '<div class="dsec"><div class="tnote big" id="driverNoteRep"></div><div class="dact"><button type="button" class="btn gry sm" data-copy><i class="ic-note"></i>Copy driver note</button></div>' +
       '<div class="tdisc">Plain text for the driver: route states and the tandem setting to use. Verify posted signs and current state rules.</div></div>');
@@ -1146,6 +1151,74 @@
     drawTruck(currentTandem());
     showReport();
     box.scrollTop = keep;
+    if (state.stopsShown && state.stopsShown.key === routeKeyOf(res)) renderStops(state.stopsShown.items, state.stopsShown.note);
+  }
+  // ---------- truck stops & fuel along the route (TomTom Search Along Route, cached) ----------
+  function routeCoords(res) { var all = []; res.route.legs.forEach(function (l) { all = all.concat(l.coordinates || []); }); return all; }
+  function routeKeyOf(res) {
+    var c = routeCoords(res); if (!c.length) return '';
+    return [0, 0.25, 0.5, 0.75, 1].map(function (f) { var p = c[Math.min(c.length - 1, Math.round(f * (c.length - 1)))]; return (+p[0]).toFixed(3) + ',' + (+p[1]).toFixed(3); }).join(';') + '|' + Math.round(res.route.totals.miles || 0);
+  }
+  var STOPS_TTL = 7 * 864e5;
+  function loadStopsAlong() {
+    var res = state.lastResult, box = $('#stopsAlong'); if (!res || !box) return;
+    var key = routeKeyOf(res); if (!key) { box.innerHTML = '<div class="muted">No route geometry.</div>'; return; }
+    if (state.stopsShown && state.stopsShown.key === key) return renderStops(state.stopsShown.items, state.stopsShown.note);
+    var lsKey = 'zr.stops.' + key, hit = null;
+    try { hit = JSON.parse(localStorage.getItem(lsKey) || 'null'); } catch (e) { hit = null; }
+    if (hit && Date.now() - hit.t < STOPS_TTL) { state.stopsShown = { key: key, items: hit.items, note: 'saved list from ' + new Date(hit.t).toLocaleDateString() }; return renderStops(hit.items, state.stopsShown.note); }
+    if (state.stopsLoading === key) return;
+    state.stopsLoading = key;
+    box.innerHTML = '<div class="muted">Searching for truck stops along the route…</div>';
+    var c = routeCoords(res), step = Math.max(1, Math.ceil(c.length / 3000));
+    var coords = c.filter(function (_, i) { return i % step === 0 || i === c.length - 1; }).map(function (p) { return [+(+p[0]).toFixed(5), +(+p[1]).toFixed(5)]; });
+    fetch('/api/stops-along', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coords: coords, totalMiles: res.route.totals.miles }) })
+      .then(function (r) { return r.json(); }).then(function (j) {
+        state.stopsLoading = null;
+        if (state.lastResult !== res) return;
+        if (!j.ok) { var b = $('#stopsAlong'); if (b) b.innerHTML = '<div class="warn">' + esc(j.error || 'Search failed') + '</div>'; return; }
+        try { localStorage.setItem(lsKey, JSON.stringify({ t: Date.now(), items: j.items })); } catch (e) { /* storage full: fine */ }
+        state.stopsShown = { key: key, items: j.items, note: j.cached ? 'cached' : j.calls + ' search call' + (j.calls === 1 ? '' : 's') };
+        renderStops(j.items, state.stopsShown.note);
+      }).catch(function (e) { state.stopsLoading = null; var b = $('#stopsAlong'); if (b) b.innerHTML = '<div class="warn">Search failed: ' + esc(e.message) + '</div>'; });
+  }
+  function renderStops(items, note) {
+    var box = $('#stopsAlong'); if (!box) return;
+    state.stopsLayer.clearLayers();
+    var h = '<table class="tbl stops"><thead><tr><th class="n">Mile</th><th>Stop</th><th>Address</th><th class="n">Detour</th></tr></thead><tbody>';
+    if (!items.length) h += '<tr><td colspan="4" class="muted">No truck stops found within a 5-minute detour.</td></tr>';
+    items.forEach(function (it) {
+      h += '<tr class="clk" data-lat="' + it.lat + '" data-lng="' + it.lng + '"><td class="n"><b>' + mi(it.mile) + '</b></td><td><b>' + esc(it.name) + '</b> <span class="muted">' + esc(it.kind) + '</span></td><td>' + esc(it.address) +
+        '</td><td class="n">' + (it.detourSec != null ? Math.max(1, Math.round(it.detourSec / 60)) + ' min' : '–') + '</td></tr>';
+      L.marker([it.lat, it.lng], { pane: 'markerPane', icon: L.divIcon({ className: '', html: '<div class="fuel-marker' + (it.kind === 'rest area' ? ' rest' : '') + '">' + ICON('fuel') + '</div>', iconSize: [20, 20], iconAnchor: [10, 10] }) })
+        .bindTooltip('<b>' + esc(it.name) + '</b><br>Mile ' + mi(it.mile) + (it.detourSec != null ? ' · ' + Math.max(1, Math.round(it.detourSec / 60)) + ' min detour' : ''))
+        .bindPopup('<b>' + esc(it.name) + '</b><br>' + esc(it.address) + '<br>Mile ' + mi(it.mile) + (it.phone ? '<br>' + esc(it.phone) : '')).addTo(state.stopsLayer);
+    });
+    box.innerHTML = h + '</tbody></table><div class="tdisc">' + items.length + ' stops from TomTom search within a 5-min detour (' + esc(note || '') + '). Mile = distance from the start along the route. Check truck parking and services before you go.</div>';
+    $$('[data-lat]', box).forEach(function (el) { el.addEventListener('click', function () { state.map.setView([+el.dataset.lat, +el.dataset.lng], 14); }); });
+  }
+  // ---------- IFTA estimate (bundled IFTA rate matrix) ----------
+  function loadIfta() {
+    if (state.iftaRates || state.iftaP) return;
+    state.iftaP = fetch('data/ifta-rates.json').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) { state.iftaRates = j; }, function (e) { state.iftaRates = { error: e.message }; })
+      .then(function () { state.iftaP = null; var b = $('#iftaRep'); if (b && state.lastResult) b.innerHTML = iftaHtml(state.lastResult); });
+  }
+  function iftaHtml(res) {
+    var R = state.iftaRates;
+    if (!R) return '<div class="muted">Loading IFTA rates…</div>';
+    if (R.error) return '<div class="warn">IFTA rates not loaded (' + esc(R.error) + ')</div>';
+    var tk = readTruck(), est = window.ZRIfta.estimate(res.states || [], tk.mpg, R);
+    var h = '<table class="tbl"><thead><tr><th>State</th><th class="n">Miles</th><th class="n">Gallons</th><th class="n">Rate</th><th class="n">Tax</th></tr></thead><tbody>';
+    if (!est.rows.length) h += '<tr><td colspan="5" class="muted">State mileage not available for this route.</td></tr>';
+    est.rows.forEach(function (r) {
+      h += '<tr><td><b>' + esc(r.code) + '</b> <span class="muted">' + esc(r.name) + '</span></td><td class="n">' + mi(r.miles, 1) + '</td><td class="n">' + r.gallons.toFixed(1) +
+        '</td><td class="n">' + (r.rate == null ? '<span class="muted" title="' + esc(r.note) + '">n/a</span>' : '$' + r.rate.toFixed(3)) + '</td><td class="n">' + (r.tax == null ? '–' : money(r.tax)) + '</td></tr>';
+    });
+    h += '</tbody><tfoot><tr><td>Total</td><td class="n">' + mi(est.miles, 1) + '</td><td class="n">' + est.gallons.toFixed(1) + '</td><td></td><td class="n">' + money(est.tax) + '</td></tr></tfoot></table>';
+    return h + '<div class="tdisc">Gallons = state miles ÷ ' + est.mpg + ' MPG. Rates: ' + esc(R.quarter) + ' diesel, ' + esc(R.status) + ', from the IFTA tax matrix (iftach.org).' +
+      (est.missing.length ? ' No IFTA rate for ' + esc(est.missing.join(', ')) + (est.missing.indexOf('OR') >= 0 ? ' (Oregon uses a weight-mile tax)' : '') + '.' : '') +
+      ' This is the tax due on fuel used per state; net IFTA owed depends on where you buy fuel (tax paid at the pump is credited).</div>';
   }
   function renderTandemSection() {
     var box = $('#tandemSection'); if (!box || !state.lastResult) return;

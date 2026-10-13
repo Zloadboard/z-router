@@ -1024,6 +1024,119 @@ function applyToRoute(route, est, rates) {
 module.exports = { estimate, applyToRoute, axleFactor, matchRoad, compileRates };
 
 };
+  defs["along"] = function (module, exports, require) {
+'use strict';
+/**
+ * Truck stops and fuel along the route (TomTom Search API "Search Along Route", free tier).
+ * The route is cut into chunks of about CHUNK_MI miles (TomTom returns at most 20 results per call, spread along the
+ * route), so a 500-mile trip costs 2 Search calls. Results get a route mile marker (nearest route point) and are
+ * merged, de-duplicated and sorted by mile. Pure: the caller does the HTTP and the caching.
+ */
+const BASE = 'https://api.tomtom.com/search/2/searchAlongRoute';
+const CHUNK_MI = 250, MAX_PTS = 500, LIMIT = 20, DETOUR_SEC = 300, MAX_CALLS = 6;
+const R = 6371008.8, MI = 1609.344;
+function hav(a, b) {
+  const t = Math.PI / 180, dLat = (b[0] - a[0]) * t, dLng = (b[1] - a[1]) * t;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * t) * Math.cos(b[0] * t) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Cumulative miles along coords ([[lat,lng]]), optionally rescaled to the router's official total. */
+function cumMiles(coords, totalMiles) {
+  const c = [0];
+  for (let i = 1; i < coords.length; i++) c.push(c[i - 1] + hav(coords[i - 1], coords[i]) / MI);
+  const k = totalMiles && c[c.length - 1] > 0 ? totalMiles / c[c.length - 1] : 1;
+  return c.map(v => v * k);
+}
+
+/** Split the route into <= MAX_CALLS chunks of about chunkMiles, each decimated to <= MAX_PTS points. */
+function chunks(coords, { chunkMiles = CHUNK_MI, totalMiles = null } = {}) {
+  if (!coords || coords.length < 2) return [];
+  const cm = cumMiles(coords, totalMiles), total = cm[cm.length - 1];
+  const n = Math.max(1, Math.min(MAX_CALLS, Math.ceil(total / chunkMiles)));
+  const out = [];
+  let start = 0;
+  for (let k = 1; k <= n; k++) {
+    const endMile = total * k / n;
+    let end = start; while (end < coords.length - 1 && cm[end] < endMile) end++;
+    const seg = coords.slice(start, end + 1);
+    const step = Math.max(1, Math.ceil(seg.length / MAX_PTS));
+    const pts = seg.filter((_, i) => i % step === 0 || i === seg.length - 1);
+    if (pts.length >= 2) out.push({ startMile: cm[start], endMile: cm[end], points: pts });
+    start = end;
+  }
+  return out;
+}
+
+function buildRequest(chunk, { query = 'truck stop', maxDetourTime = DETOUR_SEC, limit = LIMIT } = {}) {
+  const params = new URLSearchParams({ maxDetourTime: String(maxDetourTime), limit: String(limit), spreadingMode: 'auto', language: 'en-US' });
+  return { url: `${BASE}/${encodeURIComponent(query)}.json`, params, body: JSON.stringify({ route: { points: chunk.points.map(p => ({ lat: +p[0].toFixed(5), lon: +p[1].toFixed(5) })) } }) };
+}
+
+const TRUCK_BRANDS = /pilot|flying j|love'?s|\bta\b|travelcenters|petro|speedway|kwik|road ranger|ambest|bosselman|sapp|town pump|kenly|iowa 80|little america|sheetz|wawa|buc-ee|travel plaza|truck stop|truckstop|travel center|service plaza/i;
+function kindOf(r) {
+  const cats = ((r.poi && r.poi.categories) || []).join(' ').toLowerCase();
+  const name = (r.poi && r.poi.name) || '';
+  if (/rest area|service area/i.test(name)) return 'rest area';
+  if (/truck stop|truck_stop/.test(cats) || /truck stop|truckstop|travel (center|plaza)|service plaza|pilot|flying j|love'?s|petro|\bta\b/i.test(name)) return 'truck stop';
+  if (/rest area|rest_area/.test(cats) || /rest area/i.test(name)) return 'rest area';
+  if (/petrol|gas|fuel/.test(cats) || /fuel|gas/i.test(name)) return 'fuel';
+  return 'stop';
+}
+
+/** TomTom results -> [{id, name, brand, kind, lat, lng, address, phone, detourSec, detourMi, mile}] */
+function normalize(json, coords, cm) {
+  return ((json && json.results) || []).filter(r => r.position).map(r => {
+    const lat = r.position.lat, lng = r.position.lon;
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < coords.length; i++) { const d = (coords[i][0] - lat) ** 2 + ((coords[i][1] - lng) * Math.cos(lat * Math.PI / 180)) ** 2; if (d < bd) { bd = d; best = i; } }
+    const a = r.address || {}, poi = r.poi || {};
+    return {
+      id: r.id || poi.name + '@' + lat.toFixed(4) + ',' + lng.toFixed(4),
+      name: poi.name || a.freeformAddress || 'Stop', brand: ((poi.brands || [])[0] || {}).name || '',
+      kind: kindOf(r), lat, lng, address: a.freeformAddress || '', phone: poi.phone || '',
+      detourSec: r.detourTime != null ? Math.round(r.detourTime) : null,
+      detourMi: r.detourDistance != null ? Math.round(r.detourDistance / MI * 10) / 10 : null,
+      mile: Math.round(cm[best] * 10) / 10,
+      truckFriendly: TRUCK_BRANDS.test(poi.name || '') || TRUCK_BRANDS.test(((poi.brands || [])[0] || {}).name || '')
+    };
+  });
+}
+
+function merge(lists) {
+  const seen = new Map();
+  for (const l of lists) for (const it of l) {
+    const k = it.name.toLowerCase() + '@' + it.lat.toFixed(3) + ',' + it.lng.toFixed(3);
+    if (!seen.has(it.id) && !seen.has(k)) { seen.set(it.id, it); seen.set(k, it); }
+  }
+  return Array.from(new Set(seen.values())).sort((x, y) => x.mile - y.mile);
+}
+
+/** Small stable key for caching a route's stop list (same route -> same key). */
+function routeKey(coords, totalMiles) {
+  if (!coords || !coords.length) return '';
+  const pick = [0, 0.25, 0.5, 0.75, 1].map(f => coords[Math.min(coords.length - 1, Math.round(f * (coords.length - 1)))]);
+  return pick.map(p => p[0].toFixed(3) + ',' + p[1].toFixed(3)).join(';') + '|' + Math.round(totalMiles || 0);
+}
+
+/** Thin the browser->server payload: keep about maxPts points (enough for mile markers and 250-mi chunks). */
+function thin(coords, maxPts = 3000) {
+  const step = Math.max(1, Math.ceil(coords.length / maxPts));
+  return coords.filter((_, i) => i % step === 0 || i === coords.length - 1).map(p => [+(+p[0]).toFixed(5), +(+p[1]).toFixed(5)]);
+}
+
+/** Run the chunked searches. post(url, params, body) -> Promise<TomTom JSON>. Calls run one after another (free-tier QPS). */
+async function findAlong(coords, totalMiles, post) {
+  const cs = chunks(coords, { totalMiles });
+  const cm = cumMiles(coords, totalMiles);
+  const lists = [];
+  for (const c of cs) { const rq = buildRequest(c); lists.push(normalize(await post(rq.url, rq.params, rq.body), coords, cm)); }
+  return { items: merge(lists), calls: cs.length };
+}
+
+module.exports = { findAlong, BASE, CHUNK_MI, MAX_CALLS, chunks, cumMiles, buildRequest, normalize, merge, routeKey, thin, kindOf };
+
+};
   defs["states"] = function (module, exports, require) {
 'use strict';
 /*

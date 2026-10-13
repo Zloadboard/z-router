@@ -233,6 +233,50 @@
     "https://mdta.maryland.gov/Toll_Rates/jfk_rates.html",
     "https://mdta.maryland.gov/TollRatesTables"
    ]
+  },
+  {
+   "id": "tx-ntta",
+   "name": "NTTA toll roads (DFW)",
+   "states": [
+    "TX"
+   ],
+   "match": "Dallas North Tollway|\\bDNT\\b|George Bush|\\bPGBT\\b|Sam Rayburn|Chisholm Trail|SH[- ]?360 Tollway|Mountain Creek Lake|Addison Airport|Lewisville Lake Toll",
+   "ratePerMile": 0.88,
+   "confidence": "derived",
+   "basis": "NTTA TollTag rate 22 cents/mi for 2 axles (Jul 1 2025 to Jun 30 2027); 5-axle = 4x the 2-axle rate (N-1 formula in NTTA's rate tables). ZipCash (pay by mail) is double.",
+   "sources": [
+    "https://www.ntta.org/sites/default/files/2025-06/NTTAS_2025-2027_Toll%20Rate%20Tables.pdf",
+    "https://www.wfaa.com/article/traffic/ntta-toll-rate-increase/287-2e5e9c34-1e3c-44f5-b961-c97ea2bcf97a"
+   ]
+  },
+  {
+   "id": "tx-sh130",
+   "name": "SH 130",
+   "states": [
+    "TX"
+   ],
+   "match": "\\bSH[- ]?130\\b|State Highway 130|Pickle Parkway",
+   "ratePerMile": 0.86,
+   "confidence": "derived",
+   "basis": "Blend of TxDOT Segments 1-4 (5-axle tag $8.96 per mainline plaza; 2-axle full length $8.96 over 49.0 mi = $0.183/mi, x4 = $0.73/mi, effective Jan 1 2026) and Segments 5-6 (Class D 5-axle toll tag $41.78 for the full ~41 mi trip, about $1.02/mi; new rates Nov 11 2026).",
+   "sources": [
+    "https://www.txdot.gov/content/dam/docs/commission/2025/1030/9c4.pdf",
+    "https://mysh130.com/traveler-info/toll-rates/"
+   ]
+  },
+  {
+   "id": "tx-sht",
+   "name": "Sam Houston Tollway (Beltway 8)",
+   "states": [
+    "TX"
+   ],
+   "match": "Sam Houston Tollway|Sam Houston Toll|Beltway 8|\\bBW[- ]?8\\b",
+   "ratePerMile": 0.62,
+   "confidence": "derived",
+   "basis": "HCTRA 2026 schedule: 5-axle EZ TAG $7.00 at each mainline plaza ($8.00 Ship Channel Bridge), plazas roughly every 11 mi on the ~88-mi loop; ramp tolls extra. Cash/non-tag $8.75.",
+   "sources": [
+    "https://www.hctra.org/-/media/10B739D9B3574853AE8E3D86C100D951"
+   ]
   }
  ],
  "facilities": [

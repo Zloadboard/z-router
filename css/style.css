@@ -368,3 +368,28 @@ details.inline summary{color:#000;font-size:12px}
   .tbl.hosstops td:nth-child(2){padding-top:0;padding-bottom:0}
   .tbl input.appt{max-width:none}
 }
+/* saved trips dialog */
+.dlg{border:0;border-radius:8px;padding:0;width:min(520px,94vw);box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:var(--font);color:#111}
+.dlg::backdrop{background:rgba(10,20,40,.35)}
+.dlghd{display:flex;align-items:center;justify-content:space-between;height:36px;padding:0 8px 0 14px;background:#1d4f86;color:#fff}
+.dlghd b{font-size:14px}
+.dlghd .ibtn{background:none;border:0;color:#fff;font-size:20px;width:32px;height:32px;cursor:pointer}
+.dlgrow{display:flex;gap:8px;padding:12px 14px 6px}
+.dlgrow input{flex:1;height:32px;box-sizing:border-box;border:1px solid #c5ccd6;border-radius:4px;padding:0 8px;font:inherit;color:#111}
+#tripList{padding:0 14px;max-height:50vh;overflow:auto}
+.tlempty{padding:10px 0}
+.dlg .dact,.dlg .tdisc{padding:0 14px}
+.dlg .tdisc{padding-bottom:12px}
+.tbl.trips td{vertical-align:middle}
+.tbl.trips td.n{white-space:nowrap}
+/* send to driver */
+.sendgrid{display:flex;gap:16px;align-items:flex-start;margin-bottom:10px}
+.sendq{flex:0 0 150px;text-align:center}
+.sendq svg{width:150px;height:150px;display:block}
+.sendl{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.sl{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#111}
+.srow{display:flex;gap:6px}
+.srow input{flex:1;min-width:0;height:32px;box-sizing:border-box;border:1px solid #c5ccd6;border-radius:4px;padding:0 8px;font:inherit;font-size:12px;color:#111;background:#f6f8fb}
+.sl textarea{width:100%;box-sizing:border-box;border:1px solid #c5ccd6;border-radius:4px;padding:8px;font:12px/1.45 var(--font);color:#111;background:#f6f8fb;resize:vertical}
+a.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+@media (max-width:600px){.sendgrid{flex-direction:column;align-items:stretch}.sendq{flex:none}.sendq svg{margin:0 auto}}

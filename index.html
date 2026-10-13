@@ -24,6 +24,7 @@
       <button type="button" role="menuitem" data-go="truck"><i data-i="truck"></i>Truck profile</button>
       <button type="button" role="menuitem" data-go="route"><i data-i="sliders"></i>Routing preferences</button>
       <button type="button" role="menuitem" data-go="costs"><i data-i="cash"></i>Load economics</button>
+      <button type="button" role="menuitem" id="tripsBtn"><i data-i="list"></i>Saved trips…</button>
       <div class="msep"></div>
       <div class="minfo" id="settingsInfo"></div>
       <button type="button" role="menuitem" id="forgetBtn"><i data-i="close"></i>Forget saved settings…</button>
@@ -158,6 +159,7 @@
         <button type="button" class="rb" data-report="note">Driver Note</button>
         <button type="button" class="rb" data-report="stops">Truck Stops &amp; Fuel</button>
         <button type="button" class="rb" data-report="ifta">IFTA Estimate</button>
+        <button type="button" class="rb" data-report="send">Send to Driver</button>
         <button type="button" class="rb" data-report="full">Print / Full Report</button>
       </div>
       <div class="grid3 btnrow back" id="backRow">
@@ -180,6 +182,13 @@
 </aside>
 <div id="toast" class="toast hidden"></div>
 
+<dialog id="tripsDlg" class="dlg" aria-labelledby="tripsTitle">
+  <div class="dlghd"><b id="tripsTitle">Saved trips</b><button type="button" class="ibtn" id="tripsClose" aria-label="Close">×</button></div>
+  <div class="dlgrow"><input type="text" id="tripName" maxlength="80" placeholder="Trip name" aria-label="Trip name"><button type="button" class="btn run sm" id="tripSave">Save current trip</button></div>
+  <div id="tripList"></div>
+  <div class="dact"><button type="button" class="btn gry sm" id="tripExport">Export JSON</button><button type="button" class="btn gry sm" id="tripImportBtn">Import JSON</button><input type="file" id="tripImport" accept=".json,application/json" hidden></div>
+  <div class="tdisc">Trips are saved in this browser only. Export to back them up or move them to another computer.</div>
+</dialog>
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="js/calc.js"></script>
 <script src="js/tandem.js"></script>
@@ -187,6 +196,8 @@
 <script src="js/icons.js"></script>
 <script src="js/ifta.js"></script>
 <script src="js/hos.js"></script>
+<script src="js/trips.js"></script>
+<script src="vendor/qrcode-generator.js"></script>
 <script src="config.js"></script>
 <script src="js/zr-lib.js"></script>
 <script src="js/static-api.js"></script>

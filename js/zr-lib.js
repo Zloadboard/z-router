@@ -24,6 +24,22 @@ function parseLatLngText(text) {
   return validLatLng(p) ? p : null;
 }
 
+/** "999,999" style text: two numbers that are not valid coordinates (must not be sent to geocoding). */
+function badLatLngText(text) {
+  return /^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/.test(String(text || '')) && !parseLatLngText(text);
+}
+
+/** Search/geocode hit sanity: a bare Street hit must contain the query's first words (TomTom fuzzy matching
+ * otherwise turns gibberish like "Xqzzyplatt Nowhere" into "Nowhere Road, WI"). */
+function plausibleHit(q, hit) {
+  if (!hit) return false;
+  if (hit.confidence != null && hit.confidence < 0.75) return false;
+  if (!/street/i.test(hit.resultType || '')) return true;
+  const words = String(q || '').split(',')[0].toLowerCase().match(/[a-z]{4,}/g) || [];
+  const label = String(hit.label || '').toLowerCase();
+  return words.every(w => label.indexOf(w) >= 0 || /^(street|road|avenue|drive|lane|boulevard|highway)$/.test(w));
+}
+
 function fmtLatLng(p) { return `${(+p.lat).toFixed(6)},${(+p.lng).toFixed(6)}`; }
 
 /** Local departure time string ("YYYY-MM-DDTHH:MM:SS", no offset = local time at origin), or null. */
@@ -42,7 +58,7 @@ function haversineMeters(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
-module.exports = { InputError, validLatLng, parseLatLngText, fmtLatLng, departureTime, haversineMeters };
+module.exports = { InputError, validLatLng, parseLatLngText, badLatLngText, plausibleHit, fmtLatLng, departureTime, haversineMeters };
 
 };
   defs["../public/js/calc"] = function (module, exports, require) {
@@ -613,7 +629,8 @@ function normalizeSearch(json) {
 function normalizeGeocode(json) {
   const r = json && json.results && json.results[0];
   if (!r || !r.position) return null;
-  return { label: resultLabel(r), lat: r.position.lat, lng: r.position.lon };
+  return { label: resultLabel(r), lat: r.position.lat, lng: r.position.lon, resultType: r.type,
+    confidence: r.matchConfidence && isFinite(r.matchConfidence.score) ? r.matchConfidence.score : null };
 }
 
 /**
@@ -715,7 +732,7 @@ function normalizeRoute(json, { waypoints, prefs = {} } = {}) {
       tollSections.push({ leg: li, meters, a, b, paymentTypes: sec.tollPaymentTypes || [], countryCode: sec.countryCode || null });
       if (li != null) legs[li].tollMeters += meters;
     }
-    if (type === 'TRAVEL_MODE' && sec.travelMode && sec.travelMode !== 'truck') {
+    if (type === 'TRAVEL_MODE' && sec.travelMode && sec.travelMode !== 'truck' && meters >= 80) {
       notices.push({ leg: li, code: 'travelModeNotTruck', severity: 'critical',
         title: `Truck routing not possible on part of this route (${C.round(C.metersToMiles(meters), 1)} mi, travel mode "${sec.travelMode}")`,
         details: ['TomTom could not keep this stretch truck-legal for the given dimensions/weight/hazmat (often near a stop). Check restrictions and the delivery address.'],
@@ -777,7 +794,8 @@ function normalizeRoute(json, { waypoints, prefs = {} } = {}) {
     totals,
     legs,
     tolls: {
-      available: false,
+      available: tollSections.length === 0, // no toll sections = $0 for sure; with sections the price comes from lib/tolls.js
+      estimated: tollSections.length === 0,
       total: 0,
       currency: 'USD',
       miles: C.round(C.metersToMiles(tollMeters), 1),
@@ -804,6 +822,14 @@ function preferenceWarnings(prefs = {}, truck = {}) {
   if (prefs.avoidSharpTurns) w.push('Avoid Sharp Turns is not supported by TomTom and was ignored.');
   if (prefs.seasonalClosures) w.push('Apply Seasonal Closures: TomTom has no seasonal-closure option; only closures/road works known to TomTom are applied. Verify mountain passes and seasonal roads.');
   if (prefs.reorderStops) w.push('Re-order Stops uses TomTom\'s fast heuristic (shortest overall length); the order may not be optimal.');
+  const ft = (f, i) => (parseFloat(f) || 0) + (parseFloat(i) || 0) / 12;
+  const over = [];
+  if (C.num(truck.weightLbs) > 80000) over.push(`gross weight ${Math.round(C.num(truck.weightLbs)).toLocaleString('en-US')} lb (federal limit 80,000 lb)`);
+  if (ft(truck.widthFt, truck.widthIn) > 8.5) over.push('width over 8\'6"');
+  if (ft(truck.heightFt, truck.heightIn) > 13.5) over.push('height over 13\'6" (most eastern states; 14\' in many western states)');
+  const ax = Math.round(C.num(truck.axleCount));
+  if (ax && C.num(truck.weightLbs) > 0 && ax * 20000 < C.num(truck.weightLbs) * 0.9) over.push(`${ax} axles for ${Math.round(C.num(truck.weightLbs)).toLocaleString('en-US')} lb`);
+  if (over.length) w.push('Oversize/overweight: ' + over.join('; ') + '. This route does not check state permit rules or permit routes; get the permits and follow the permitted route.');
   if (truck.type && truck.type !== 'semi' && truck.type !== 'straight') w.push('Truck type: TomTom has no trailer-count/tractor setting; restrictions are based on dimensions, weight, axles and hazmat.');
   return w;
 }
@@ -871,7 +897,8 @@ function compileRates(rates) {
 /** Road entry for a state + instruction text: a road whose regex matches, else the state's road without a regex, else any road in that state. */
 function matchRoad(c, state, text) {
   const inState = c.roads.filter(r => state && (r.states || []).indexOf(state) >= 0);
-  return inState.find(r => r.re && r.re.test(text || '')) || inState.find(r => !r.re) || inState[0] || null;
+  // a state whose only entries have a road pattern (e.g. NY Thruway) prices other toll roads there at the generic rate
+  return inState.find(r => r.re && r.re.test(text || '')) || inState.find(r => !r.re) || null;
 }
 
 function inBox(p, b) { return p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]; }
@@ -930,7 +957,7 @@ function estimate(raw, { rates, axles = 5, stateAt } = {}) {
       const key = sec.leg + '|' + st + '|' + (road ? road.id : 'generic');
       if (!cur || cur.key !== key) {
         flush();
-        cur = { key, seq: i, leg: sec.leg, state: st, roadId: road ? road.id : 'generic', roadName: road ? road.name : (st ? st + ' toll road' : 'Toll road'),
+        cur = { key, seq: i, leg: sec.leg, state: st, roadId: road ? road.id : 'generic', roadName: road ? road.name : (st ? st + ' toll road' : 'Toll road outside US'),
           refs: [], meters: 0, rate5: road ? road.ratePerMile : c.generic, basis: 'per-mile',
           confidence: road ? road.confidence : 'generic', sources: road ? road.sources : [] };
       }
@@ -948,14 +975,23 @@ function estimate(raw, { rates, axles = 5, stateAt } = {}) {
     }
     // slivers (< 0.5 mi) at a bridge/tunnel approach belong to that facility, not a per-mile road
     let kept = flats.length ? secItems.filter(it => it.meters >= 0.5 * MI) : secItems;
-    // short generic pieces (< 1 mi, state with no listed toll road) next to a listed road are border/polygon slop: merge into the neighbour
+    // short generic pieces next to another road are border/polygon slop: merge into the neighbour
     kept = kept.filter((it, k) => {
-      if (it.roadId !== 'generic' || it.meters >= MI || kept.length < 2) return true;
-      const nb = [kept[k - 1], kept[k + 1]].find(x => x && x.roadId !== 'generic');
+      // also short 'outside US' pieces: bridges over water fall outside the state polygons
+      const slop = it.roadId === 'generic' && (it.meters < MI || (!it.state && it.meters < 3 * MI));
+      if (!slop || kept.length < 2) return true;
+      const nb = [kept[k - 1], kept[k + 1]].find(x => x && (x.roadId !== 'generic' || (x.state && !it.state)));
       if (!nb) return true;
       nb.meters += it.meters; return false;
     });
     items.push(...kept.concat(flats).sort((x, y) => x.seq - y.seq));
+  }
+  // one row per road: join consecutive pieces of the same road (TomTom splits sections at interchanges)
+  for (let k = items.length - 1; k > 0; k--) {
+    const x = items[k - 1], y = items[k];
+    if (x.basis === 'per-mile' && y.basis === 'per-mile' && x.leg === y.leg && x.roadId === y.roadId && x.state === y.state) {
+      x.meters += y.meters; y.refs.forEach(r => { if (x.refs.indexOf(r) < 0) x.refs.push(r); }); items.splice(k, 1);
+    }
   }
   const out = items.map(it => {
     const miles = it.meters / MI;

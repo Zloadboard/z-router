@@ -87,7 +87,7 @@
   // typed text without a picked suggestion -> TomTom fuzzy Search (the Pages key has no Geocoding API)
   function geocode(q) {
     var s = tomtom.buildSearchRequest({ q: q, typeahead: false, limit: 1 });
-    return providerGet(s.url, s.params).then(function (j) { var hit = tomtom.normalizeSearch(j)[0]; return hit ? { label: hit.label, lat: hit.lat, lng: hit.lng } : null; });
+    return providerGet(s.url, s.params).then(function (j) { var hit = tomtom.normalizeSearch(j)[0]; return common.plausibleHit(q, hit) ? { label: hit.label, lat: hit.lat, lng: hit.lng } : null; });
   }
 
   // ---------- route planning (same steps as server.js planTrip / planTomTom) ----------
@@ -103,6 +103,7 @@
       if (common.validLatLng(w)) return { label: label || w.lat + ',' + w.lng, lat: +w.lat, lng: +w.lng, role: w.role };
       var ll = common.parseLatLngText(w.text);
       if (ll) return { label: w.text.trim(), lat: ll.lat, lng: ll.lng, role: w.role };
+      if (common.badLatLngText(w.text)) throw new common.InputError('"' + w.text.trim() + '" is not a valid lat,lng (latitude -90..90, longitude -180..180).');
       return geocode(w.text).then(function (g) {
         if (!g) throw new common.InputError('Could not find "' + w.text + '". Pick an address from the suggestions or enter lat,lng.');
         return { label: g.label, lat: g.lat, lng: g.lng, role: w.role };
@@ -173,6 +174,7 @@
     var warnings = [], points, r, costs;
     return resolveWaypoints(filled).then(function (p) {
       points = p;
+      if (points.every(function (q) { return common.haversineMeters([q.lat, q.lng], [points[0].lat, points[0].lng]) < 100; })) throw new common.InputError('Start and End are the same place. Enter a different End (or add a stop).');
       if (prefs.reorderStops && points.length < 4) warnings.push('Re-order Stops needs at least 2 intermediate stops; nothing to re-order.');
       return planTomTom({ truck: truck, prefs: prefs, points: points, warnings: warnings });
     }).then(function (res) {

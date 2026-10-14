@@ -236,7 +236,7 @@
     var rows = visibleRows(), next = move === 'run' ? null : nextTabRow(row);
     if (next) $('input', next).focus(); else $('#runBtn').focus();
   }
-  /** v0.9.2 Tab order: skip empty middle boxes; the next filled middle box or End; Run Trip when End is filled. */
+  /** v0.9.5 Tab order: next box down; from an empty stop box, End (or Run Trip when End is filled). */
   function nextTabRow(row) {
     var rows = visibleRows(), vals = rows.map(function (r) { return !!$('input', r).value.trim(); });
     var k = S.nextTab(vals, rows.indexOf(row));
@@ -1797,7 +1797,7 @@
     try { var raw = localStorage.getItem(XD_KEY); if (raw) list = JSON.parse(raw); } catch (e) { list = null; }
     if (Array.isArray(list)) return Promise.resolve({ list: list, from: 'board' });
     if (xd.defaults) return Promise.resolve({ list: xd.defaults, from: 'default' });
-    return fetch('data/crossdocks-default.json?v=0.9.4').then(function (r) { return r.json(); })
+    return fetch('data/crossdocks-default.json?v=0.9.5').then(function (r) { return r.json(); })
       .then(function (j) { xd.defaults = Array.isArray(j) ? j : []; return { list: xd.defaults, from: 'default' }; })
       .catch(function () { return { list: [], from: 'none' }; });
   }

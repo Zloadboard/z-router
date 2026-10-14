@@ -1787,7 +1787,7 @@
   // ---------- Crossdocks layer: the partner list from the Freight Board's Crossdock section ----------
   // Same website as the Freight Board, so its saved list (synced through the Google Sheet) is readable here.
   // Addresses are looked up once (TomTom search) and remembered in this browser.
-  var XD_KEY = 'fcbv2_xdrop_partners', XD_GEO_KEY = 'zr.xdockGeo.v1';
+  var XD_KEY = 'fcbv2_xdrop_partners', XD_GEO_KEY = 'zr.xdockGeo.v2'; // v2 (0.9.4): points checked against their city
   var xd = { list: [], geo: {}, on: false, busy: false, defaults: null };
   function xdKey(p) { return String(p.addr || p.city || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
   function xdLoadGeo() { try { xd.geo = JSON.parse(localStorage.getItem(XD_GEO_KEY) || '{}') || {}; } catch (e) { xd.geo = {}; } }
@@ -1797,19 +1797,40 @@
     try { var raw = localStorage.getItem(XD_KEY); if (raw) list = JSON.parse(raw); } catch (e) { list = null; }
     if (Array.isArray(list)) return Promise.resolve({ list: list, from: 'board' });
     if (xd.defaults) return Promise.resolve({ list: xd.defaults, from: 'default' });
-    return fetch('data/crossdocks-default.json?v=0.9.3').then(function (r) { return r.json(); })
+    return fetch('data/crossdocks-default.json?v=0.9.4').then(function (r) { return r.json(); })
       .then(function (j) { xd.defaults = Array.isArray(j) ? j : []; return { list: xd.defaults, from: 'default' }; })
       .catch(function () { return { list: [], from: 'none' }; });
   }
+  /* v0.9.4: 0.9.3 took the first hit of a general search, which can be a business with a similar name far away
+   * (Sturtevant, WI "11201 Enterprise Way" landed off). Now: find the CITY first, then search only street
+   * addresses near it, and keep the address point only if it is within 35 mi of that city; otherwise use the city. */
+  function xdCityText(p) {
+    var c = String(p.city || '').replace(/\(.*?\)/g, '').trim();
+    if (!/,\s*[A-Z]{2}\b/.test(c)) { var m = String(p.addr || '').match(/([A-Za-z .'-]+),\s*([A-Z]{2})\b(?:\s+\d{5})?\s*$/); if (m) c = m[1].trim() + ', ' + m[2]; }
+    return c;
+  }
+  function xdLookup(q, idx, at) {
+    return api('/api/geocode?q=' + encodeURIComponent(q) + (idx ? '&idx=' + idx : '') + (at ? '&at=' + at.lat.toFixed(4) + ',' + at.lng.toFixed(4) : ''))
+      .then(function (j) { return j && j.ok && j.item ? j.item : null; }, function () { return null; });
+  }
+  function xdMiles(a, b) {
+    var R = 3958.8, r = Math.PI / 180, dl = (b.lat - a.lat) * r, dg = (b.lng - a.lng) * r;
+    var h = Math.sin(dl / 2) * Math.sin(dl / 2) + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dg / 2) * Math.sin(dg / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
   function xdGeocode(p) {
-    var tries = [p.addr, p.city].map(function (s) { return String(s || '').trim(); }).filter(Boolean);
-    var step = function (i) {
-      if (i >= tries.length) return Promise.resolve(null);
-      return api('/api/geocode?q=' + encodeURIComponent(tries[i])).then(function (j) {
-        return j && j.ok && j.item ? { lat: j.item.lat, lng: j.item.lng, label: j.item.label, approx: i > 0 } : step(i + 1);
-      }, function () { return step(i + 1); });
-    };
-    return step(0);
+    var cityQ = xdCityText(p), addrQ = String(p.addr || '').trim();
+    var cityP = cityQ ? xdLookup(cityQ, 'Geo').then(function (c) { return c || xdLookup(cityQ, ''); }) : Promise.resolve(null);
+    return cityP.then(function (c) {
+      if (!addrQ || addrQ.toLowerCase() === cityQ.toLowerCase()) return c ? { lat: c.lat, lng: c.lng, approx: false, check: 'city' } : null;
+      // strip a leading company name ("Rick Cargo, 300 Brogdon Rd ...") so the street search sees the address
+      var street = addrQ.replace(/^[^,\d]*[A-Za-z][^,\d]*,\s*(?=\d)/, '');
+      return xdLookup(street, 'PAD,Addr,Str', c).then(function (a) {
+        if (a && (!c || xdMiles(a, c) <= 35)) return { lat: a.lat, lng: a.lng, approx: false, check: c ? Math.round(xdMiles(a, c)) + ' mi from city' : 'no city' };
+        if (c) return { lat: c.lat, lng: c.lng, approx: true, check: a ? 'address hit was ' + Math.round(xdMiles(a, c)) + ' mi away; city used' : 'address not found; city used' };
+        return a ? { lat: a.lat, lng: a.lng, approx: false, check: 'no city check' } : null;
+      });
+    });
   }
   /** Look up the partners that have no map point yet, one at a time. */
   function xdLocateMissing() {
@@ -1819,7 +1840,7 @@
     var i = 0, next = function () {
       if (i >= todo.length) { xd.busy = false; xdSaveGeo(); xdDraw(); return; }
       var p = todo[i++];
-      xdGeocode(p).then(function (g) { xd.geo[xdKey(p)] = g ? { lat: g.lat, lng: g.lng, approx: g.approx, at: Date.now() } : { failedAt: Date.now() }; if (i % 5 === 0) { xdSaveGeo(); xdDraw(); } setTimeout(next, 150); });
+      xdGeocode(p).then(function (g) { xd.geo[xdKey(p)] = g ? { lat: g.lat, lng: g.lng, approx: g.approx, check: g.check, at: Date.now() } : { failedAt: Date.now() }; if (i % 5 === 0) { xdSaveGeo(); xdDraw(); } setTimeout(next, 150); });
     };
     next();
   }

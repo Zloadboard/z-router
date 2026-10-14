@@ -151,13 +151,20 @@ module.exports = { InputError, validLatLng, parseLatLngText, badLatLngText, plau
     var miles = Math.max(0, num(opts.miles));
     var cost = Math.max(0, num(opts.totalCost));
     var profit = rate - cost;
+    // deadheadMiles: empty miles inside this trip (truck location -> pickup). Cost covers all miles;
+    // rate per loaded mile is what the broker pays per paid mile.
+    var dh = Math.min(miles, Math.max(0, num(opts.deadheadMiles)));
+    var loaded = miles - dh;
     return {
       revenue: round(rate, 2),
       cost: round(cost, 2),
       profit: round(profit, 2),
       margin: round(profit / rate * 100, 1),
       ratePerMile: miles > 0 ? round(rate / miles, 2) : 0,
-      profitPerMile: miles > 0 ? round(profit / miles, 2) : 0
+      profitPerMile: miles > 0 ? round(profit / miles, 2) : 0,
+      deadheadMiles: round(dh, 1),
+      loadedMiles: round(loaded, 1),
+      ratePerLoadedMile: dh > 0 && loaded > 0 ? round(rate / loaded, 2) : null
     };
   }
 

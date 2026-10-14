@@ -185,7 +185,8 @@
       costs = costsFor(r.route, truck);
       return routeStatesAndTandem(r.route, truck, warnings);
     }).then(function (st) {
-      var economics = calc.computeEconomics({ loadRate: truck.loadRate, miles: r.route.totals.miles, totalCost: costs.totalCost });
+      var dhMiles = truck.deadhead === 'leg1' && r.route.legs.length > 1 ? r.route.legs[0].miles : 0;
+      var economics = calc.computeEconomics({ loadRate: truck.loadRate, miles: r.route.totals.miles, totalCost: costs.totalCost, deadheadMiles: dhMiles });
       var hos = calc.hosEstimate(r.route.totals.durationSec);
       if (r.route.departureTime) hos.arrivalTime = calc.addSecondsIso(r.route.departureTime, hos.totalSec, r.route.arrivalTime || r.route.departureTime);
       var params = r.requestParams, pobj = {};

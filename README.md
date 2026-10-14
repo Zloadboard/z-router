@@ -19,3 +19,9 @@ A static site cannot hide an API key. `config.js` contains a TomTom key made onl
 - `vendor/`: Leaflet (BSD-2-Clause) and the Inter font (SIL Open Font License)
 
 Route results are planning estimates. Before dispatch, check posted signs, clearances, weight and hazmat limits, tandem rules, permits and road conditions.
+
+## Freight Board links and crossdocks (v0.9.3)
+
+- The Freight Board's 🗺 Route button opens `?from=…&stop=…&to=…&rate=…&date=…&run=1` (each place is text or `text@lat,lng`; up to 5 stops). Truck and routing settings are left as they are. `deadhead=leg1` marks the first leg empty.
+- **Crossdocks** map layer: the partner list from the Freight Board's Crossdock section (same website, so its synced list is readable here; the built-in list in `data/crossdocks-default.json` is used until the board has saved one). Addresses are looked up once and remembered in the browser. Green = within 25 mi of the current route; the Legs report lists them by route mile. `?xdock=1` opens with the layer on and zoomed to all of them.
+- The load rate (and deadhead choice) is never saved in the browser.

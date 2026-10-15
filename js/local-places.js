@@ -14,28 +14,60 @@
     utah: 'UT', vermont: 'VT', virginia: 'VA', washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY' };
   var ABBR = {}; Object.keys(STATES).forEach(function (k) { ABBR[STATES[k]] = true; });
 
-  var cities = [], byKey = {}, zips = {}, loadP = null;
+  var cities = [], byKey = {}, byState = {}, zips = {}, loadP = null;
 
-  /** Canonical form used for matching: lower case, no dots/commas, "saint"->"st", "fort"->"ft", "mount"->"mt". */
-  function canon(s) {
-    return String(s || '').toLowerCase().replace(/[.,']/g, ' ').replace(/\s+/g, ' ').trim()
-      .replace(/\bsaint\b/g, 'st').replace(/\bsainte\b/g, 'ste').replace(/\bfort\b/g, 'ft').replace(/\bmount\b/g, 'mt');
+  // v2 (2026-10-15): spelling-proof keys. Letters only, so "Mc Kinney" = "McKinney", "La Vergne" = "LaVergne",
+  // "O'Fallon" = "OFallon", "Winston-Salem" = "Winston Salem"; common words shortened the same way on both sides.
+  var SHORT = { saint: 'st', sainte: 'ste', fort: 'ft', mount: 'mt', north: 'n', south: 's', east: 'e', west: 'w',
+    heights: 'hts', springs: 'spgs', falls: 'fls', junction: 'jct', township: 'twp', center: 'ctr', centre: 'ctr', and: '' };
+  function words(s) {
+    return String(s || '').toLowerCase().replace(/&/g, ' and ').replace(/[.']/g, '').replace(/[^a-z0-9]+/g, ' ').trim()
+      .split(' ').filter(Boolean).map(function (w) { return Object.prototype.hasOwnProperty.call(SHORT, w) ? SHORT[w] : w; }).filter(Boolean);
+  }
+  function canon(s) { return words(s).join(''); }
+  /** Same as canon but without a trailing "township"/"twp" ("Hanover Township, PA" -> "Hanover"). */
+  function canonNoTwp(s) { var w = words(s); while (w.length > 1 && w[w.length - 1] === 'twp') w.pop(); return w.join(''); }
+  /** Edit distance with an early exit once it exceeds max. */
+  function dist(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    var prev = [], cur, i, j;
+    for (j = 0; j <= b.length; j++) prev[j] = j;
+    for (i = 1; i <= a.length; i++) {
+      cur = [i]; var rowMin = i;
+      for (j = 1; j <= b.length; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        if (cur[j] < rowMin) rowMin = cur[j];
+      }
+      if (rowMin > max) return max + 1;
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+  /** Closest city name in the state for a misspelling ("Cincinatti" -> "Cincinnati"); null when nothing is close. */
+  function fuzzy(key, st) {
+    var list = byState[st]; if (!list || key.length < 5) return null;
+    var max = key.length >= 9 ? 2 : 1, best = null, bestD = max + 1, tie = false;
+    for (var i = 0; i < list.length; i++) {
+      var d = dist(key, list[i].key, max);
+      if (d < bestD) { bestD = d; best = list[i]; tie = false; } else if (d === bestD && best && list[i].key !== best.key) tie = true;
+    }
+    return best && bestD <= max && !tie ? best : null;
   }
   function parse(text) {
     text.split('\n').forEach(function (l) {
       var p = l.split('|');
       if (p[0] === 'C' && p.length >= 5) {
         var c = { name: p[1], st: p[2], lat: +p[3], lng: +p[4], key: canon(p[1]) };
-        cities.push(c);
         var k = c.key + '|' + c.st;
-        if (!byKey[k]) byKey[k] = c;
+        if (byKey[k]) return;   // same place under another spelling
+        byKey[k] = c; cities.push(c); (byState[c.st] = byState[c.st] || []).push(c);
       } else if (p[0] === 'Z' && p.length >= 6) {
         zips[p[1]] = { zip: p[1], lat: +p[2], lng: +p[3], name: p[4], st: p[5] };
       }
     });
   }
   function load() {
-    if (!loadP) loadP = fetch('data/us-places.txt?v=1').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    if (!loadP) loadP = fetch('data/us-places.txt?v=2').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
       .then(function (t) { parse(t); return true; })
       .catch(function (e) { loadP = null; throw e; });
     return loadP;
@@ -43,12 +75,17 @@
 
   /** Split typed text into { zip } or { city, st } (st may be null). Returns null for street addresses. */
   function split(q) {
-    var s = String(q || '').trim().replace(/\s+/g, ' ').replace(/,?\s*(usa|us|united states)$/i, '');
+    var s = String(q || '').trim().replace(/\s+/g, ' ')
+      .replace(/\s+\/.*$/, '')                                   // "Lake Zurich, IL / Yard" -> "Lake Zurich, IL"
+      .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.)]+$/g, '')             // "-City Of Industry-, CA" leftovers
+      .replace(/,?\s*(usa|us|united states)$/i, '');
     var z = s.match(/^(\d{5})(-\d{4})?$/);
     if (z) return { zip: z[1] };
     if (/^\d+\s+\S/.test(s)) return null; // "123 Main St, ..." is a street address: leave it to TomTom
     s = s.replace(/\s+\d{5}(-\d{4})?$/, ''); // "Romeoville, IL 60446" -> "Romeoville, IL"
-    var parts = s.split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+    var parts = s.split(',').map(function (x) { return x.trim().replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.)]+$/g, ''); }).filter(Boolean);
+    // "Saint Charles, Il, IL": drop a repeated state
+    while (parts.length >= 3 && parts[parts.length - 1].toLowerCase() === parts[parts.length - 2].toLowerCase()) parts.pop();
     var city = parts[0] || '', st = null;
     if (parts.length >= 2) {
       var tail = parts[parts.length - 1].toLowerCase();
@@ -84,7 +121,10 @@
       if (s.zip) { var z = zips[s.zip]; return z ? { label: (z.name ? z.name + ', ' + z.st + ' ' : '') + z.zip, lat: z.lat, lng: z.lng } : null; }
       var key = canon(s.city);
       if (!key) return null;
-      if (s.st) { var c = byKey[key + '|' + s.st]; return c ? { label: c.name + ', ' + c.st, lat: c.lat, lng: c.lng } : null; }
+      if (s.st) {
+        var c = byKey[key + '|' + s.st] || byKey[canonNoTwp(s.city) + '|' + s.st] || fuzzy(key, s.st);
+        return c ? { label: c.name + ', ' + c.st, lat: c.lat, lng: c.lng } : null;
+      }
       var all = cities.filter(function (x) { return x.key === key; });
       return all.length === 1 ? { label: all[0].name + ', ' + all[0].st, lat: all[0].lat, lng: all[0].lng } : null;
     });

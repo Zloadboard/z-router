@@ -102,13 +102,26 @@
 
   // ---------- search ----------
   var places = window.ZRPlaces || null;
+  // TomTom Geocoding API: separate free monthly allowance from Search (needs "Geocoding API" ticked on the key).
+  // Used when the built-in list has no match and Search cannot answer (out of credits).
+  function geocodeApi(q, limit) {
+    var url = 'https://api.tomtom.com/search/2/geocode/' + encodeURIComponent(String(q).trim()) + '.json';
+    return providerGet(url, { limit: String(limit || 1), countrySet: 'US,CA,MX' }).then(function (j) {
+      return ((j && j.results) || []).filter(function (r) { return r.position; }).map(function (r) {
+        var a = r.address || {}, label = a.freeformAddress || (a.municipality ? a.municipality + ', ' + (a.countrySubdivisionCode || a.countrySubdivision || '') : String(q));
+        return { id: 'geo:' + (r.id || label), title: label, label: label, resultType: r.type, lat: r.position.lat, lng: r.position.lon };
+      });
+    });
+  }
   function tomtomSuggest(q, at) { var r = tomtom.buildSearchRequest({ q: q, at: at }); return providerGet(r.url, r.params).then(tomtom.normalizeSearch); }
   // Cities and ZIPs come from the built-in list first (free, instant); street addresses and no-match go to TomTom.
   function suggest(q, at) {
     if (!places) return tomtomSuggest(q, at);
     return places.suggest(q, at).catch(function () { return null; }).then(function (local) {
       if (local && local.length) return local;
-      return tomtomSuggest(q, at).catch(function (e) { if (local) return []; throw e; });
+      return tomtomSuggest(q, at).catch(function (e) {
+        return geocodeApi(q, 5).catch(function () { if (local) return []; throw e; });
+      });
     });
   }
   // typed text without a picked suggestion -> TomTom fuzzy Search (the Pages key has no Geocoding API)
@@ -123,9 +136,10 @@
       if (hit) return hit;
       return tomtomGeocode(q, opts).catch(function (e) {
         // TomTom cannot answer (no credits, network): fall back to the city in the text, if there is one.
-        return (exact ? places.lookup(q).catch(function () { return null; }) : Promise.resolve(null)).then(function (h) {
-          return h || places.cityOf(q).catch(function () { return null; });
-        }).then(function (h) { if (h) return h; throw e; });
+        return geocodeApi(q, 1).then(function (r) { return r[0] ? { label: r[0].label, lat: r[0].lat, lng: r[0].lng } : null; }, function () { return null; })
+          .then(function (h) { return h || (exact ? places.lookup(q).catch(function () { return null; }) : null); })
+          .then(function (h) { return h || places.cityOf(q).catch(function () { return null; }); })
+          .then(function (h) { if (h) return h; throw e; });
       });
     });
   }

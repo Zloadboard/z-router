@@ -55,7 +55,10 @@
       // one tiny Search request (the Pages key is enabled for Routing + Search only), plus one probe tile:
       // TomTom map tiles are used only if that tile loads; otherwise the free tiles are used, silently.
       var s = tomtom.buildSearchRequest({ q: 'Chicago, IL', typeahead: false, limit: 1 });
-      keyCheckP = Promise.all([providerGet(s.url, s.params), probeTiles(), probeTraffic()]).then(function () { keyCheck.status = 'ok'; keyCheck.message = null; })
+      // Wait for every probe even when the Search check fails fast (e.g. out of credits): Promise.all used to stop
+      // early, so the traffic probe had not finished when the config was built and traffic showed as unavailable.
+      keyCheckP = Promise.all([providerGet(s.url, s.params).then(function () { return null; }, function (e) { return e; }), probeTiles(), probeTraffic()])
+        .then(function (r) { if (r[0]) throw r[0]; keyCheck.status = 'ok'; keyCheck.message = null; })
         .catch(function (e) {
           // Out of Search credits is not a broken key: routing still works and cities/ZIPs come from the built-in list.
           if (e.code === 'PROVIDER_CREDITS') { keyCheck.status = 'ok'; keyCheck.message = null; keyCheck.searchCredits = false; return; }
@@ -326,8 +329,12 @@
   };
   // Map tiles straight from TomTom (Map Display API raster tiles); app.js asks for these templates.
   window.ZR_TILE_URL = function (view) {
-    if (!KEY || !tomtomTiles) return null;
+    if (!KEY) return null;
     var k = 'key=' + encodeURIComponent(KEY);
+    // Traffic is its own TomTom service: it must not depend on the map-tile probe.
+    if (view === 'traffic') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?tileSize=256&' + k : null;
+    if (view === 'incidents') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/incidents/s1/{z}/{x}/{y}.png?tileSize=256&' + k : null;
+    if (!tomtomTiles) return null;
     if (view === 'map') return 'https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?tileSize=256&view=Unified&language=en-US&' + k;
     if (view === 'satellite') return 'https://api.tomtom.com/map/1/tile/sat/main/{z}/{x}/{y}.jpg?' + k;
     if (view === 'traffic') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?tileSize=256&' + k : null;

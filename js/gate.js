@@ -91,7 +91,7 @@
   function panel() {
     ensureDlg();
     var cur = Fx.resolve(G.published, false), h = '<div class="dlghd"><b id="ownerTitle">Owner panel</b><button type="button" class="ibtn" id="ownerClose" aria-label="Close">×</button></div>' +
-      '<div class="ownscroll">' + (document.querySelector('#trafficLayerBtn.trf-na') ? '<div class="ownnote ownwarn"><b>Traffic layer is off:</b> the TomTom key on this site cannot load traffic tiles. In the TomTom developer portal open the key, tick <b>Traffic</b> (Traffic Flow and Incidents) and save; it works a few minutes later.</div>' : '') + '<div class="ownnote">You see everything. Tick what <b>visitors</b> should see, then copy or download the new <b>features.json</b>, replace it in the site repo and push.</div><div class="ownlist" id="ownerList">';
+      '<div class="ownscroll"><div id="ownTrf"></div><div class="ownnote">You see everything. Tick what <b>visitors</b> should see, then copy or download the new <b>features.json</b>, replace it in the site repo and push.</div><div class="ownlist" id="ownerList">';
     Fx.GROUPS.forEach(function (g) {
       h += '<div class="cap">' + esc(g[1]) + '</div>';
       Fx.FEATURES.filter(function (f) { return f.group === g[0]; }).forEach(function (f) {
@@ -103,6 +103,8 @@
       '<div class="dact"><button type="button" class="btn gry sm" id="ownPrev">View as visitor</button><button type="button" class="btn gry sm" id="ownLock">Lock owner mode</button></div>' +
       '<div class="tdisc">Visitors get the file when it is committed as <b>features.json</b> in the site repo (a minute after the push). Soft protection only: the page code is public.</div></div>';
     dlg.innerHTML = h;
+    var trf = function () { var n = $('#ownTrf', dlg); if (n) n.innerHTML = document.querySelector('#trafficLayerBtn.trf-na') ? '<div class="ownnote ownwarn"><b>Traffic layer is off:</b> the TomTom key on this site cannot load traffic tiles. In the TomTom developer portal open the key, tick <b>Traffic</b> (Traffic Flow and Incidents) and save; it works a few minutes later.</div>' : ''; };
+    trf(); setTimeout(trf, 800); setTimeout(trf, 2500); // the map finishes its start-up check a moment after the page opens
     var boxes = $$('#ownerList input', dlg);
     function selNow() { var s = {}; boxes.forEach(function (b) { s[b.dataset.id] = b.checked; }); return s; }
     function stat() {

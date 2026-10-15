@@ -1,5 +1,5 @@
 /* Z Router feature flags (v0.10.0) - the ONE place that lists what can be switched on or off for visitors.
- * Basic (the default for every visitor of the Pages site) = only the features with visitor:false stay hidden.
+ * Basic (the default for every visitor of the Pages site) = the features with visitor:true are shown; visitor:false stay hidden.
  * The owner unlocks everything and chooses what visitors see; that choice is saved in features.json (repo file the site loads at startup).
  * The desktop app is always fully unlocked. Pure code: works in the browser (window.ZRFeatures) and in Node tests/tools.
  *
@@ -16,20 +16,21 @@
     { id: 'states', group: 'reports', label: 'State Mileage', visitor: false },
     { id: 'tandem', group: 'reports', label: 'Tandem Rules', visitor: false },
     { id: 'directions', group: 'reports', label: 'Directions', visitor: false },
-    { id: 'tolls', group: 'reports', label: 'Tolls & Warnings', visitor: false },
+    { id: 'tolls', group: 'reports', label: 'Tolls & Warnings', visitor: true },
     { id: 'costs', group: 'reports', label: 'Load Economics', visitor: false },
     { id: 'settings', group: 'reports', label: 'Trip Settings', visitor: false },
     { id: 'note', group: 'reports', label: 'Driver Note', visitor: false },
-    { id: 'stops', group: 'reports', label: 'Truck Stops & Fuel (+ rest areas layer, EIA diesel)', visitor: false, module: 'stops' },
+    { id: 'stops', group: 'reports', label: 'Truck Stops & Fuel (+ rest areas layer, EIA diesel)', visitor: true, module: 'stops' },
     { id: 'ifta', group: 'reports', label: 'IFTA Estimate', visitor: false, module: 'ifta' },
     { id: 'send', group: 'reports', label: 'Send to Driver (link, QR)', visitor: false, module: 'share' },
     { id: 'full', group: 'reports', label: 'Print / Full Report', visitor: false },
     { id: 'hos', group: 'planner', label: 'HOS planner + appointment times', visitor: false, module: 'hos' },
     { id: 'trips', group: 'planner', label: 'Saved trips (save, export, import)', visitor: false, module: 'share' },
-    { id: 'tollMap', group: 'map', label: 'Toll map layer (Tolls button, rates, legend)', visitor: false },
+    { id: 'tollMap', group: 'map', label: 'Toll map layer (Tolls button, rates, legend)', visitor: true },
+    { id: 'traffic', group: 'map', label: 'Live traffic layer (TomTom flow + incident tiles)', visitor: true },
     { id: 'crossdocks', group: 'map', label: 'Crossdocks map layer (Freight Board partners)', visitor: false },
     { id: 'tandemUi', group: 'truck', label: 'Tandem settings, alerts and map labels', visitor: false },
-    { id: 'routePrefs', group: 'truck', label: 'Routing preferences (avoid tolls, ferries, ...)', visitor: false },
+    { id: 'routePrefs', group: 'truck', label: 'Routing preferences (avoid tolls, ferries, ...)', visitor: true },
     { id: 'costsAdv', group: 'truck', label: 'Advanced costs (load rate, per hour, fuel source/type, profit)', visitor: false }
   ];
   /** module -> modules that must load with it */
@@ -57,7 +58,13 @@
   function parseJson(text) { try { var j = JSON.parse(text); return j && typeof j === 'object' && j.visitors ? j : null; } catch (e) { return null; } }
 
   // ---- owner code check: salted PBKDF2-SHA256, only the hash is stored (data/owner.json) ----
-  function normalize(code) { return String(code || '').trim().toLowerCase().replace(/[\s_]+/g, '-').replace(/-+/g, '-'); }
+  /** Forgiving on purpose: case, spaces, any dash (smart dashes from phones, non-breaking hyphen), zero-width/paste junk and stray punctuation
+   *  all collapse to the same text: lowercase letters and digits joined by single hyphens. */
+  function normalize(code) {
+    var s = String(code == null ? '' : code);
+    try { s = s.normalize('NFKC'); } catch (e) { /* old engines */ }
+    return s.replace(/[\u200b-\u200d\u2060\ufeff\u00ad]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
   function toB64(u8) { var s = ''; for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return (typeof btoa === 'function' ? btoa(s) : Buffer.from(u8).toString('base64')); }
   function fromB64(b) { if (typeof atob === 'function') { var s = atob(b), u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; } return new Uint8Array(Buffer.from(b, 'base64')); }
   function hashCode(code, saltB64, iter) {

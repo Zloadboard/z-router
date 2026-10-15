@@ -52,13 +52,21 @@
       // one tiny Search request (the Pages key is enabled for Routing + Search only), plus one probe tile:
       // TomTom map tiles are used only if that tile loads; otherwise the free tiles are used, silently.
       var s = tomtom.buildSearchRequest({ q: 'Chicago, IL', typeahead: false, limit: 1 });
-      keyCheckP = Promise.all([providerGet(s.url, s.params), probeTiles()]).then(function () { keyCheck.status = 'ok'; keyCheck.message = null; })
+      keyCheckP = Promise.all([providerGet(s.url, s.params), probeTiles(), probeTraffic()]).then(function () { keyCheck.status = 'ok'; keyCheck.message = null; })
         .catch(function (e) { keyCheck.status = e.code === 'PROVIDER_AUTH' ? 'rejected' : 'error'; keyCheck.message = e.message; });
     }
     return keyCheckP;
   }
 
-  var tomtomTiles = false;
+  var tomtomTiles = false, trafficTiles = false;
+  // The traffic overlay needs the Traffic API ticked on the (domain-locked) web key. Probe one flow tile with an <img> (sends our Referer, no CORS needed).
+  function probeTraffic() {
+    return new Promise(function (resolve) {
+      var im = new Image(), done = false, fin = function (ok) { if (!done) { done = true; trafficTiles = ok; resolve(); } };
+      im.onload = function () { fin(true); }; im.onerror = function () { fin(false); }; setTimeout(function () { fin(false); }, 6000);
+      im.src = 'https://api.tomtom.com/traffic/map/4/tile/flow/relative/4/4/5.png?tileSize=256&key=' + encodeURIComponent(KEY);
+    });
+  }
   function probeTiles() {
     var u = 'https://api.tomtom.com/map/1/tile/basic/main/4/4/5.png?tileSize=256&view=Unified&key=' + encodeURIComponent(KEY);
     return realFetch(u).then(function (r) { tomtomTiles = r.ok; }, function () { tomtomTiles = false; });
@@ -214,7 +222,7 @@
     return {
       ok: true, provider: 'tomtom', providerLabel: LABEL, configured: ok, hereConfigured: ok, demo: false, static: true,
       message: ok ? null : KEY_MISSING, keyCheck: keyCheck, capabilities: tomtom.CAPABILITIES,
-      tiles: tiles ? 'tomtom' : 'osm',
+      tiles: tiles ? 'tomtom' : 'osm', traffic: !!(ok && keyCheck.status === 'ok' && trafficTiles),
       tileViews: tiles ? { map: true, terrain: false, satellite: true, satlabels: true } : { map: false, terrain: false, satellite: false, satlabels: false },
       truckTypes: TRUCK_TYPES, hazmat: calc.HAZMAT.map(function (h) { return { id: h.id, label: h.label }; })
     };
@@ -277,6 +285,8 @@
     var k = 'key=' + encodeURIComponent(KEY);
     if (view === 'map') return 'https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?tileSize=256&view=Unified&language=en-US&' + k;
     if (view === 'satellite') return 'https://api.tomtom.com/map/1/tile/sat/main/{z}/{x}/{y}.jpg?' + k;
+    if (view === 'traffic') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?tileSize=256&' + k : null;
+    if (view === 'incidents') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/incidents/s1/{z}/{x}/{y}.png?tileSize=256&' + k : null;
     if (view === 'satlabels') return 'https://api.tomtom.com/map/1/tile/hybrid/main/{z}/{x}/{y}.png?tileSize=256&view=Unified&language=en-US&' + k;
     return null;
   };

@@ -67,15 +67,20 @@
   function codeForm() {
     ensureDlg();
     dlg.innerHTML = '<div class="dlghd"><b id="ownerTitle">Owner</b><button type="button" class="ibtn" id="ownerClose" aria-label="Close">×</button></div>' +
-      '<form id="ownerForm" autocomplete="off"><div class="dlgrow"><input type="password" id="ownerCode" name="ownerCode" autocomplete="off" spellcheck="false" placeholder="Owner code" aria-label="Owner code">' +
-      '<button type="submit" class="btn run sm" id="ownerGo">Unlock</button></div><div class="ownmsg" id="ownerMsg" role="status"></div></form>';
+      '<form id="ownerForm" autocomplete="off"><div class="dlgrow"><input type="password" id="ownerCode" name="ownerCode" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Owner code" aria-label="Owner code">' +
+      '<button type="submit" class="btn run sm" id="ownerGo">Unlock</button></div><label class="ck ownshow"><input type="checkbox" id="ownerShow">Show the code</label><div class="ownmsg" id="ownerMsg" role="status"></div></form>';
+    $('#ownerShow', dlg).onchange = function () { $('#ownerCode', dlg).type = this.checked ? 'text' : 'password'; };
     $('#ownerClose', dlg).onclick = closeDlg;
     $('#ownerForm', dlg).onsubmit = function (e) {
       e.preventDefault();
       var code = $('#ownerCode', dlg).value, msg = $('#ownerMsg', dlg), btn = $('#ownerGo', dlg);
-      if (!code.trim()) return;
+      if (!Fx.normalize(code)) return;
       btn.disabled = true; msg.textContent = 'Checking…'; msg.className = 'ownmsg';
-      Fx.verify(code, G.ownerCfg).then(function (ok) {
+      // owner.json is normally loaded at startup; if that failed (offline, blocked, slow), try once more now
+      (G.ownerCfg ? Promise.resolve(G.ownerCfg) : getJson('owner.json?t=' + Date.now()).then(function (c) { G.ownerCfg = c; return c; })).then(function (cfg) {
+        if (!cfg) throw new Error('Could not load owner.json (offline or blocked?). Reload the page and try again.');
+        return Fx.verify(code, cfg);
+      }).then(function (ok) {
         if (ok) { try { localStorage.setItem(OWNER_KEY, G.ownerCfg.hash.slice(0, 16)); sessionStorage.removeItem(PREVIEW_KEY); } catch (x) { /* ignore */ } location.hash = ''; history.replaceState(null, '', location.pathname + location.search); location.reload(); return; }
         setTimeout(function () { msg.textContent = 'That code is not right.'; msg.className = 'ownmsg bad'; btn.disabled = false; $('#ownerCode', dlg).select(); }, 700);
       }, function (err) { msg.textContent = err.message || 'Could not check the code.'; msg.className = 'ownmsg bad'; btn.disabled = false; });
@@ -134,6 +139,22 @@
   window.addEventListener('hashchange', checkHash);
   document.addEventListener('DOMContentLoaded', function () { checkHash(); });
   if (document.readyState !== 'loading') checkHash();
+  // a tiny "Owner" link next to the version text (the 5-click trick is easy to miss on a phone); not in the desktop app
+  function addOwnerLink() {
+    var v = $('#verTxt'); if (!B || !v || $('#ownerLink')) return;
+    var a = el('a', { id: 'ownerLink', class: 'own-link', href: '#owner', role: 'button' }, 'Owner');
+    v.parentNode.insertBefore(a, v); v.parentNode.classList.add('has-own');
+    a.addEventListener('click', function (e) { e.preventDefault(); G.ready.then(G.openOwner); });
+  }
+  if (document.readyState !== 'loading') addOwnerLink(); else document.addEventListener('DOMContentLoaded', addOwnerLink);
+  // a page copy cached from an older release (GitHub Pages caches for 10 minutes): notice the newer version and reload once
+  if (B && B.version) {
+    getJson('version.json?t=' + Date.now()).then(function (j) {
+      if (!j || !j.version || j.version === B.version) return;
+      var k = 'zr.reloaded'; try { if (sessionStorage.getItem(k) === j.version) return; sessionStorage.setItem(k, j.version); } catch (e) { return; }
+      location.reload();
+    });
+  }
   var clicks = [];
   document.addEventListener('click', function (e) {
     if (!e.target.closest || !e.target.closest('#verTxt')) return;

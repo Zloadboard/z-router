@@ -845,6 +845,8 @@ function preferenceWarnings(prefs = {}, truck = {}) {
 function tileUrl(view, z, x, y) {
   if (view === 'map') return `${BASE}/map/1/tile/basic/main/${z}/${x}/${y}.png?tileSize=256&view=Unified&language=en-US`;
   if (view === 'satellite') return z <= 19 ? `${BASE}/map/1/tile/sat/main/${z}/${x}/${y}.jpg` : null;
+  if (view === 'traffic') return `${BASE}/traffic/map/4/tile/flow/relative/${z}/${x}/${y}.png?tileSize=256`;
+  if (view === 'incidents') return `${BASE}/traffic/map/4/tile/incidents/s1/${z}/${x}/${y}.png?tileSize=256`;
   if (view === 'satlabels') return `${BASE}/map/1/tile/hybrid/main/${z}/${x}/${y}.png?tileSize=256&view=Unified&language=en-US`;
   return null; // no terrain layer in TomTom raster Map Display -> client falls back to OpenTopoMap
 }

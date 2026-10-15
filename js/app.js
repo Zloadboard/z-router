@@ -773,6 +773,56 @@
       layer.addTo(state.map); tollLegendControl().addTo(state.map);
     }, function () { setTollLayer(false); });
   }
+  // ---------- Live traffic layer (TomTom Traffic API raster tiles: flow + incidents; tiles only, no other Traffic calls) ----------
+  var TRAFFIC_LEGEND = [['#1a9a3a', 'Free flowing'], ['#f2c200', 'Slower than usual'], ['#e8590c', 'Slow'], ['#b00020', 'Heavy / stopped']];
+  function trafficTileUrl(view) { return (window.ZR_TILE_URL && window.ZR_TILE_URL(view)) || '/api/tiles/' + view + '/{z}/{x}/{y}'; }
+  function trafficUnavailable(why, quiet) {
+    state.trafficNA = true;
+    if (state.trafficOn) setTrafficLayer(false, true);
+    var b = $('#trafficLayerBtn'); if (!b) return;
+    b.disabled = true; b.classList.remove('on'); b.setAttribute('aria-pressed', 'false'); b.classList.add('trf-na');
+    b.title = why || 'Live traffic is not available with this API key (the Traffic API is not enabled on it).';
+    if (!quiet && state.trafficOn !== false) toast('Traffic layer is not available: ' + (why || 'Traffic API not enabled on this key'));
+  }
+  function trafficTiles() {
+    if (state.trafficLayers) return state.trafficLayers;
+    var errors = 0, ok = 0, tileOpts = { pane: 'trafficPane', minZoom: 5, maxZoom: 19, maxNativeZoom: 18, attribution: 'Traffic &copy; TomTom' };
+    var flow = L.tileLayer(trafficTileUrl('traffic'), Object.assign({ opacity: 0.85 }, tileOpts));
+    var inc = L.tileLayer(trafficTileUrl('incidents'), Object.assign({}, tileOpts, { attribution: '' }));
+    flow.on('tileload', function () { ok++; });
+    flow.on('tileerror', function () { errors++; if (errors >= 4 && ok === 0) trafficUnavailable('the Traffic API is not enabled on this key (TomTom answered 401/403)'); });
+    state.trafficLayers = [flow, inc];
+    return state.trafficLayers;
+  }
+  function trafficLegendControl() {
+    if (state.trafficLegend) return state.trafficLegend;
+    var C2 = L.Control.extend({ options: { position: 'bottomleft' }, onAdd: function () {
+      var d = L.DomUtil.create('div', 'tlegend trlegend');
+      d.innerHTML = '<div class="tl-h">Live traffic</div>' + TRAFFIC_LEGEND.map(function (x) {
+        return '<div class="tl-r"><i style="background:' + x[0] + '"></i>' + esc(x[1]) + '</div>';
+      }).join('') + '<div class="tl-n">Icons show incidents and closures. Traffic © TomTom</div>';
+      L.DomEvent.disableClickPropagation(d);
+      return d;
+    } });
+    state.trafficLegend = new C2();
+    return state.trafficLegend;
+  }
+  function setTrafficLayer(on, quiet) {
+    state.trafficOn = !!on && !state.trafficNA;
+    var b = $('#trafficLayerBtn'); if (b && !state.trafficNA) { b.classList.toggle('on', state.trafficOn); b.setAttribute('aria-pressed', state.trafficOn ? 'true' : 'false'); }
+    if (!quiet) { try { localStorage.setItem('zr.trafficLayer', state.trafficOn ? 'on' : 'off'); } catch (e) { /* ignore */ } }
+    if (!state.trafficOn) { if (state.trafficLayers) state.trafficLayers.forEach(function (l) { state.map.removeLayer(l); }); if (state.trafficLegend) state.map.removeControl(state.trafficLegend); return; }
+    trafficTiles().forEach(function (l) { l.addTo(state.map); }); trafficLegendControl().addTo(state.map);
+  }
+  function initTraffic() {
+    var b = $('#trafficLayerBtn'); if (!b || !can('traffic')) return;
+    state.map.createPane('trafficPane'); state.map.getPane('trafficPane').style.zIndex = 380; state.map.getPane('trafficPane').style.pointerEvents = 'none'; // above the base map, under toll roads and the route
+    var cfg = state.config || {};
+    if (!cfg.traffic) { trafficUnavailable(cfg.configured === false ? 'needs a routing key' : 'the Traffic API is not enabled on this key', true); return; }
+    b.addEventListener('click', function () { setTrafficLayer(!state.trafficOn); });
+    var on = false; try { on = localStorage.getItem('zr.trafficLayer') === 'on'; } catch (e) { /* private mode */ }
+    if (on) setTrafficLayer(true, true);
+  }
   function providerTiles(view) {
     var cfg = state.config || {};
     return cfg.tiles && cfg.tiles !== 'osm' && cfg.tileViews && cfg.tileViews[view] && !state.tileFailed[view];
@@ -1440,6 +1490,7 @@
     loadRules().then(onTandemInput);
     openFromHash();
     initCrossdocks();
+    initTraffic();
     applyLinkParams();
     booted = true;
     Object.keys(MODS).forEach(function (k) { if (MODS[k].init) MODS[k].init(); });
@@ -1492,7 +1543,7 @@
     try { var raw = localStorage.getItem(XD_KEY); if (raw) list = JSON.parse(raw); } catch (e) { list = null; }
     if (Array.isArray(list)) return Promise.resolve({ list: list, from: 'board' });
     if (xd.defaults) return Promise.resolve({ list: xd.defaults, from: 'default' });
-    return fetch('data/crossdocks-default.json?v=0.10.0').then(function (r) { return r.json(); })
+    return fetch('data/crossdocks-default.json?v=0.11.0').then(function (r) { return r.json(); })
       .then(function (j) { xd.defaults = Array.isArray(j) ? j : []; return { list: xd.defaults, from: 'default' }; })
       .catch(function () { return { list: [], from: 'none' }; });
   }

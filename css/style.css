@@ -454,3 +454,9 @@ a.btn{display:inline-flex;align-items:center;justify-content:center;text-decorat
 #ownerDlg .ownwarn{border-left:3px solid #b45309;margin-left:var(--pad);padding:0 var(--pad) 0 8px}
 @media (max-width:900px){.dlgrow input{font-size:16px} /* iOS Safari zooms into smaller inputs */}
 @media (min-width:901px) and (max-width:1200px){.mapctl{flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - var(--side) - 64px)}}
+/* owner-mode badge (v0.11.3): visible while this browser is unlocked; one click leaves owner mode */
+.ownbadge{position:absolute;top:calc((var(--top) - 1px - 24px) / 2);left:calc(var(--side) + 12px + 372px);height:24px;padding:0 10px;border:1px solid #b45309;border-radius:12px;background:#fde68a;color:#000;font:700 12px/22px var(--font);cursor:pointer;white-space:nowrap;z-index:2}
+.ownbadge u{text-underline-offset:2px}
+@media (max-width:1200px){.ownbadge{left:calc(var(--side) + 12px + 12px + 260px + 12px)}}
+@media (max-width:900px){.ownbadge{left:150px}}
+@media (max-width:430px){.ownbadge{left:128px;padding:0 8px;font-size:11px}}

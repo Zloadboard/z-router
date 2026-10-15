@@ -35,6 +35,20 @@
       s.onload = function () { resolve(true); }; s.onerror = function () { resolve(false); }; document.head.appendChild(s);
     });
   }
+  /** Leave owner mode: forget the unlock on this browser and reload as a normal visitor. */
+  function exitOwner() { try { localStorage.removeItem(OWNER_KEY); sessionStorage.removeItem(PREVIEW_KEY); } catch (e) { /* ignore */ } try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ } location.reload(); }
+  /** While owner mode is on, a visible badge says so and leaves it with one click (the unlock is remembered in this browser until then). */
+  function ownerBadge() {
+    if (!B || !G.owner || document.getElementById('ownerBadge')) return;
+    var add = function () {
+      if (document.getElementById('ownerBadge')) return;
+      var b = document.createElement('button'); b.type = 'button'; b.id = 'ownerBadge'; b.className = 'ownbadge';
+      b.title = 'You are seeing everything because this browser is unlocked as the owner. Click to leave owner mode and see the site as a visitor does.';
+      b.innerHTML = 'Owner mode on · <u>Exit</u>'; b.onclick = exitOwner;
+      (document.querySelector('.topbar') || document.body).appendChild(b);
+    };
+    if (document.body) add(); else document.addEventListener('DOMContentLoaded', add);
+  }
   function storedOwner() { try { return localStorage.getItem(OWNER_KEY) || ''; } catch (e) { return ''; } }
   function ownerOk(cfg) { var v = storedOwner(); return !!(cfg && cfg.hash && v && v === cfg.hash.slice(0, 16)); }
 
@@ -44,6 +58,7 @@
     G.mode = G.owner ? 'owner' : 'basic';
     G.sel = Fx.resolve(G.published, G.owner);
     G.apply();
+    ownerBadge();
     var need = Fx.modulesFor(G.sel).filter(function (m) { return B.mods && B.mods[m]; });
     return Promise.all(need.map(function (m) { return loadScript(B.mods[m]); }));
   });
@@ -100,7 +115,7 @@
     });
     h += '</div></div><div class="ownfoot"><div class="ownstat" id="ownerStat"></div><div class="dact"><button type="button" class="btn run sm" id="ownCopy">Copy features.json</button><button type="button" class="btn gry sm" id="ownDown">Download</button>' +
       '<button type="button" class="btn gry sm" id="ownBasic">All off</button><button type="button" class="btn gry sm" id="ownAll">All on</button></div>' +
-      '<div class="dact"><button type="button" class="btn gry sm" id="ownPrev">View as visitor</button><button type="button" class="btn gry sm" id="ownLock">Lock owner mode</button></div>' +
+      '<div class="dact"><button type="button" class="btn gry sm" id="ownPrev">View as visitor</button><button type="button" class="btn gry sm" id="ownLock" title="Forget the unlock on this browser and reload as a visitor">Exit owner mode</button></div>' +
       '<div class="tdisc">Visitors get the file when it is committed as <b>features.json</b> in the site repo (a minute after the push). Soft protection only: the page code is public.</div></div>';
     dlg.innerHTML = h;
     var trf = function () { var n = $('#ownTrf', dlg); if (n) n.innerHTML = document.querySelector('#trafficLayerBtn.trf-na') ? '<div class="ownnote ownwarn"><b>Traffic layer is off:</b> the TomTom key on this site cannot load traffic tiles. In the TomTom developer portal open the key, tick <b>Traffic</b> (Traffic Flow and Incidents) and save; it works a few minutes later.</div>' : ''; };
@@ -126,7 +141,7 @@
     $('#ownBasic', dlg).onclick = function () { boxes.forEach(function (b) { b.checked = false; }); stat(); };
     $('#ownAll', dlg).onclick = function () { boxes.forEach(function (b) { b.checked = true; }); stat(); };
     $('#ownPrev', dlg).onclick = function () { try { sessionStorage.setItem(PREVIEW_KEY, 'basic'); } catch (e) { /* ignore */ } location.reload(); };
-    $('#ownLock', dlg).onclick = function () { try { localStorage.removeItem(OWNER_KEY); sessionStorage.removeItem(PREVIEW_KEY); } catch (e) { /* ignore */ } location.reload(); };
+    $('#ownLock', dlg).onclick = exitOwner;
     showDlg();
   }
   /** Open the Owner dialog: the code form, or the panel once unlocked. Not available in the desktop app. */
@@ -137,7 +152,9 @@
     else codeForm();
   };
   // entry points: #owner in the URL, or 5 clicks on the version text within 3 seconds
-  function checkHash() { if (/^#owner$/i.test(location.hash)) { history.replaceState(null, '', location.pathname + location.search); G.ready.then(G.openOwner); } }
+  function checkHash() {
+    if (/^#visitor$/i.test(location.hash)) { exitOwner(); return; } // #visitor: leave owner mode on this browser
+    if (/^#owner$/i.test(location.hash)) { history.replaceState(null, '', location.pathname + location.search); G.ready.then(G.openOwner); } }
   window.addEventListener('hashchange', checkHash);
   document.addEventListener('DOMContentLoaded', function () { checkHash(); });
   if (document.readyState !== 'loading') checkHash();

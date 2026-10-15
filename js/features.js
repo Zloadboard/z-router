@@ -28,13 +28,13 @@
     { id: 'trips', group: 'planner', label: 'Saved trips (save, export, import)', visitor: false, module: 'share' },
     { id: 'tollMap', group: 'map', label: 'Toll map layer (Tolls button, rates, legend)', visitor: true },
     { id: 'traffic', group: 'map', label: 'Live traffic layer (TomTom flow + incident tiles)', visitor: true },
-    { id: 'crossdocks', group: 'map', label: 'Crossdocks map layer (Freight Board partners)', visitor: false },
+    { id: 'crossdocks', group: 'map', label: 'Crossdocks map layer (Freight Board partners)', visitor: false, module: 'crossdocks' },
     { id: 'tandemUi', group: 'truck', label: 'Tandem settings, alerts and map labels', visitor: false },
     { id: 'routePrefs', group: 'truck', label: 'Routing preferences (avoid tolls, ferries, ...)', visitor: true },
     { id: 'costsAdv', group: 'truck', label: 'Advanced costs (load rate, per hour, fuel source/type, profit)', visitor: false }
   ];
   /** module -> modules that must load with it */
-  var MODULES = { hos: [], stops: [], ifta: [], share: ['hos'] };
+  var MODULES = { hos: [], stops: [], ifta: [], share: ['hos'], crossdocks: [] };
   var ids = FEATURES.map(function (f) { return f.id; });
 
   function defaults() { var o = {}; FEATURES.forEach(function (f) { o[f.id] = !!f.visitor; }); return o; }

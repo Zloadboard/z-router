@@ -2296,3 +2296,115 @@ var qrcode = function() {
 }(function () {
     return qrcode;
 }));
+
+;
+/* Z Router feature module: saved trips and Send to Driver. Loaded as a normal script on the desktop app; on the Pages build it is a hash-named file that is
+ * fetched only after owner unlock or when the owner enabled the feature for visitors (see public/js/features.js, README). */
+(window.ZRXQ = window.ZRXQ || []).push(['share', function (X) {
+  'use strict';
+  var hosRun = function (res) { return X.F.hosRun(res); }; // share depends on the hos module (loaded first)
+  var PROFILE_FIELDS = X.PROFILE_FIELDS, TRIPS = X.TRIPS, TRUCK_FIELDS = X.TRUCK_FIELDS, toast = X.toast, readStopList = X.readStopList, apptStore = X.apptStore, readTruck = X.readTruck, readPrefs = X.readPrefs, hosPrefs = X.hosPrefs, toggleMenu = X.toggleMenu, $ = X.$, $$ = X.$$, esc = X.esc, applyTrip = X.applyTrip, localISO = X.localISO, SHARE_URL = X.SHARE_URL, short = X.short, mi = X.mi, C = X.C, money = X.money, fmtAt = X.fmtAt, state = X.state, renderTandemSection = X.renderTandemSection, copyText = X.copyText, can = X.can;
+  // ---------- saved trips (localStorage) + JSON export/import (public/js/trips.js) ----------
+  var TRIPS_KEY = 'zr.trips.v1', SHARE_FIELDS = PROFILE_FIELDS.concat(['fuel']); // share links leave out rates and costs
+  function savedTrips() { try { return JSON.parse(localStorage.getItem(TRIPS_KEY) || '[]').map(function (t) { return TRIPS.sanitize(t, TRUCK_FIELDS); }).filter(Boolean); } catch (e) { return []; } }
+  function storeTrips(list) { try { localStorage.setItem(TRIPS_KEY, JSON.stringify(list)); return true; } catch (e) { toast('Could not save: browser storage is full or off'); return false; } }
+  function currentTrip(name, forShare) {
+    var stops = readStopList().filter(Boolean), ap = apptStore(), appts = {};
+    Object.keys(ap).forEach(function (k) { var i = +k.split('|')[0], lab = k.slice(k.indexOf('|') + 1); if (stops[i] && stops[i].label === lab) appts[k] = ap[k]; });
+    var tk = readTruck(), truck = {}; (forShare ? SHARE_FIELDS : TRUCK_FIELDS).forEach(function (k) { if (tk[k] != null) truck[k] = tk[k]; });
+    return TRIPS.sanitize({ name: name, stops: stops, truck: truck, prefs: readPrefs(), appts: appts, hos: hosPrefs() }, TRUCK_FIELDS);
+  }
+  function openTrips() {
+    toggleMenu(false);
+    var dlg = $('#tripsDlg'); renderTripList();
+    var st = readStopList().filter(Boolean);
+    $('#tripName').value = st.length >= 2 ? TRIPS.defaultName(st) : '';
+    $('#tripSave').disabled = st.length < 2;
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+  function renderTripList() {
+    var list = savedTrips(), box = $('#tripList');
+    if (!list.length) { box.innerHTML = '<div class="muted tlempty">No saved trips yet. Enter a trip and press Save.</div>'; return; }
+    box.innerHTML = '<table class="tbl trips"><tbody>' + list.map(function (t, i) {
+      return '<tr><td><b>' + esc(t.name) + '</b><div class="muted tiny">' + t.stops.length + ' stops · saved ' + new Date(t.savedAt).toLocaleDateString() + '</div></td>' +
+        '<td class="n"><button type="button" class="btn run sm" data-load="' + i + '">Load</button> <button type="button" class="btn gry sm" data-del="' + i + '" aria-label="Delete ' + esc(t.name) + '">Delete</button></td></tr>';
+    }).join('') + '</tbody></table>';
+    $$('[data-load]', box).forEach(function (b) { b.onclick = function () { var t = savedTrips()[+b.dataset.load]; closeTrips(); if (t) { applyTrip(t, true); toast('Loaded “' + t.name + '”'); } }; });
+    $$('[data-del]', box).forEach(function (b) { b.onclick = function () {
+      var l = savedTrips(), t = l[+b.dataset.del]; if (!t || !window.confirm('Delete the saved trip “' + t.name + '”?')) return;
+      l.splice(+b.dataset.del, 1); storeTrips(l); renderTripList();
+    }; });
+  }
+  function closeTrips() { var d = $('#tripsDlg'); if (d.close) d.close(); else d.removeAttribute('open'); }
+  function initTrips() {
+    $('#tripsBtn').addEventListener('click', openTrips);
+    $('#tripsClose').addEventListener('click', closeTrips);
+    $('#tripSave').addEventListener('click', function () {
+      var t = currentTrip($('#tripName').value); if (!t) { toast('Enter a Start and an End first'); return; }
+      t.savedAt = Date.now();
+      if (storeTrips(TRIPS.upsert(savedTrips(), t))) { toast('Saved “' + t.name + '”'); renderTripList(); }
+    });
+    $('#tripExport').addEventListener('click', function () {
+      var list = savedTrips(); if (!list.length) { toast('No saved trips to export'); return; }
+      var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([TRIPS.exportJson(list)], { type: 'application/json' }));
+      a.download = 'z-router-trips-' + localISO(new Date()) + '.json'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    });
+    $('#tripImportBtn').addEventListener('click', function () { $('#tripImport').click(); });
+    $('#tripImport').addEventListener('change', function (e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      if (f.size > 1024 * 1024) { toast('File too large'); return; }
+      f.text().then(function (txt) {
+        var got = TRIPS.importJson(txt, TRUCK_FIELDS), list = savedTrips();
+        got.reverse().forEach(function (t) { list = TRIPS.upsert(list, t); });
+        storeTrips(list); renderTripList(); toast(got.length ? 'Imported ' + got.length + ' trip' + (got.length === 1 ? '' : 's') : 'No trips found in that file');
+      }).catch(function () { toast('That file is not valid JSON'); }).then(function () { e.target.value = ''; });
+    });
+  }
+
+  // ---------- send route to driver: share link, Google Maps, QR (vendored qrcode-generator), text ----------
+  function shareBase() {
+    var local = location.protocol === 'file:' || /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\])/.test(location.hostname);
+    return local ? SHARE_URL : location.href;
+  }
+  function qrSvg(text) {
+    if (!window.qrcode) return '';
+    var q = window.qrcode(0, 'L'); q.addData(text); q.make();
+    return q.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
+  }
+  function driverText(res, link, gmaps) {
+    var r = res.route, P = hosRun(res), lines = [];
+    lines.push((res.waypoints || []).map(function (w) { return short(w.label); }).join(' → ') + ': ' + mi(r.totals.miles) + ' mi, ' + C.formatDuration(r.totals.durationSec) + ' driving' +
+      (r.tolls.total > 0 ? ', tolls ~' + money(r.tolls.total, 0) : ''));
+    lines.push('Depart ' + fmtAt(Date.parse(r.departureTime), P.off0));
+    P.stops.forEach(function (st, i) {
+      lines.push((i === P.stops.length - 1 ? 'End: ' : 'Stop ' + (i + 1) + ': ') + short(st.label) + ' — ETA ' + fmtAt(st.etaMs, P.offs[i]) +
+        (st.apptMs != null ? ' (appt ' + fmtAt(st.apptMs, P.offs[i]) + ', ' + (st.status === 'late' ? 'LATE ' + C.formatDuration(st.lateMin * 60) : st.status) + ')' : ''));
+    });
+    if (P.totals.rests || P.totals.restarts) lines.push('HOS: ' + (P.totals.restarts ? P.totals.restarts + ' × 34 h restart, ' : '') + P.totals.rests + ' × 10 h off, ' + P.totals.breaks + ' × 30 min break');
+    if (state.lastNote) lines.push(state.lastNote);
+    lines.push('Truck route: ' + link);
+    lines.push('Google Maps (car directions, follow the truck route): ' + gmaps);
+    return lines.join('\n');
+  }
+  function renderSend() {
+    var res = state.lastResult, box = $('#sendRep'); if (!res || !box) return;
+    var t = currentTrip(null, true);
+    if (!t) { box.innerHTML = '<div class="muted">Enter a Start and an End first.</div>'; return; }
+    var link = TRIPS.shareUrl(shareBase(), t), gm = TRIPS.googleMapsUrl(res.waypoints.map(function (w) { return { lat: w.lat, lng: w.lng, label: w.label }; }));
+    renderTandemSection();
+    var text = driverText(res, link, gm);
+    box.innerHTML = '<div class="sendgrid"><div class="sendq">' + qrSvg(link) + '<div class="muted tiny">Scan to open this trip</div></div><div class="sendl">' +
+      '<label class="sl"><b>Trip link</b><span class="srow"><input type="text" readonly id="shareLink" value="' + esc(link) + '"><button type="button" class="btn gry sm" data-cp="link">Copy</button></span></label>' +
+      '<label class="sl"><b>Google Maps</b><span class="srow"><input type="text" readonly id="gmapsLink" value="' + esc(gm) + '"><button type="button" class="btn gry sm" data-cp="gm">Copy</button><a class="btn gry sm" target="_blank" rel="noopener" href="' + esc(gm) + '">Open</a></span></label>' +
+      '</div></div><label class="sl"><b>Text for the driver</b><textarea id="driverText" rows="9" readonly>' + esc(text) + '</textarea></label>' +
+      '<div class="dact"><button type="button" class="btn run sm" data-cp="text">Copy text</button><a class="btn gry sm" href="sms:?&body=' + encodeURIComponent(text) + '">Text message</a>' +
+      '<a class="btn gry sm" href="mailto:?subject=' + encodeURIComponent('Route: ' + TRIPS.defaultName(t.stops)) + '&body=' + encodeURIComponent(text) + '">Email</a></div>' +
+      '<div class="tdisc">The link reopens this trip in Z Router (stops, truck size, HOS and appointments; no rates or costs). ' +
+      (shareBase() === SHARE_URL ? 'Links open on the web version (' + esc(SHARE_URL.replace(/^https:\/\//, '')) + '). ' : '') +
+      'Google Maps uses car routing, so the driver should follow the truck route. The QR code is made in the browser; nothing is sent anywhere until you send it.</div>';
+    var cp = { link: [link, 'Trip link copied'], gm: [gm, 'Google Maps link copied'], text: [text, 'Driver text copied'] };
+    $$('[data-cp]', box).forEach(function (b) { b.onclick = function () { copyText(cp[b.dataset.cp][0], cp[b.dataset.cp][1]); }; });
+  }
+  return { init: initTrips };
+}]);

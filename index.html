@@ -5,8 +5,8 @@
 <title>Z Router · Truck route planner</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23184a7e'/%3E%3Cpath d='M5 9h13v11H5zM19 12h4.5l3.5 4.5V20h-8z' fill='white'/%3E%3Ccircle cx='10' cy='23' r='2.6' fill='white'/%3E%3Ccircle cx='22' cy='23' r='2.6' fill='white'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=0.9.2">
-<link rel="stylesheet" href="css/style.css?v=0.9.2">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=0.10.0">
+<link rel="stylesheet" href="css/style.css?v=0.10.0">
 </head>
 <body>
 <!-- top app bar -->
@@ -22,9 +22,9 @@
     <button type="button" class="tbtn" id="settingsBtn" aria-haspopup="true" aria-expanded="false"><i data-i="gear"></i>Settings</button>
     <div class="menu hidden" id="settingsMenu" role="menu">
       <button type="button" role="menuitem" data-go="truck"><i data-i="truck"></i>Truck profile</button>
-      <button type="button" role="menuitem" data-go="route"><i data-i="sliders"></i>Routing preferences</button>
-      <button type="button" role="menuitem" data-go="costs"><i data-i="cash"></i>Load economics</button>
-      <button type="button" role="menuitem" id="tripsBtn"><i data-i="list"></i>Saved trips…</button>
+      <button type="button" role="menuitem" data-go="route" data-feat="routePrefs"><i data-i="sliders"></i>Routing preferences</button>
+      <button type="button" role="menuitem" data-go="costs" data-feat="costsAdv"><i data-i="cash"></i>Load economics</button>
+      <button type="button" role="menuitem" id="tripsBtn" data-feat="trips"><i data-i="list"></i>Saved trips…</button>
       <div class="msep"></div>
       <div class="minfo" id="settingsInfo"></div>
       <button type="button" role="menuitem" id="forgetBtn"><i data-i="close"></i>Forget saved settings…</button>
@@ -36,7 +36,7 @@
 <!-- map controls (over the map, below the top bar) -->
 <div class="mapctl">
   <div class="mc seg"><button type="button" class="view-btn on" data-view="map">Map</button><button type="button" class="view-btn" data-view="terrain">Terrain</button><button type="button" class="view-btn" data-view="satellite">Satellite</button></div>
-  <div class="mc seg"><button type="button" id="tollLayerBtn" class="on" aria-pressed="true" title="Show / hide expensive toll roads (5-axle $/mile estimate)">Tolls</button><button type="button" id="restLayerBtn" aria-pressed="false" title="Show / hide rest areas and service plazas (OpenStreetMap; truck parking where tagged)">Rest areas</button></div>
+  <div class="mc seg" data-feat-any><button type="button" id="tollLayerBtn" data-feat="tollMap" class="on" aria-pressed="true" title="Show / hide expensive toll roads (5-axle $/mile estimate)">Tolls</button><button type="button" id="restLayerBtn" data-feat="stops" aria-pressed="false" title="Show / hide rest areas and service plazas (OpenStreetMap; truck parking where tagged)">Rest areas</button></div>
   <div class="mc"><button type="button" id="fitBtn" title="Fit route"><i data-i="expand"></i></button></div>
 </div>
 <div id="keyBanner" class="banner hidden"></div>
@@ -76,7 +76,7 @@
       <button type="button" class="sbar sbtn" id="setToggle" aria-expanded="false" aria-controls="setBody">
         <span class="st">Truck &amp; Settings</span><span class="ss" id="truckSum"></span><i data-i="chevDown" class="chev"></i>
       </button>
-      <div class="alertline hidden" id="truckAlert"></div>
+      <div class="alertline hidden" id="truckAlert" data-feat="tandemUi"></div>
       <div class="setbody hidden" id="setBody">
         <div class="cap" id="subTruck">Truck</div>
         <div class="kv" id="cardTruck">
@@ -90,16 +90,16 @@
           <label><span>Hazmat</span><span class="in"><select id="hazmat" name="hazmat"></select></span></label>
           <label><span>Max speed</span><span class="in"><select id="maxSpeed" name="maxSpeedMph"></select></span></label>
         </div>
-        <div class="cap" id="subTandem">Tandems</div>
-        <div class="kv">
+        <div class="cap" id="subTandem" data-feat="tandemUi">Tandems</div>
+        <div class="kv" data-feat="tandemUi">
           <label><span title="Kingpin to the CENTER of the rear tandem. States that measure to the rearmost axle are converted using the tandem spread.">KP → tandem</span><span class="in"><input id="kpraFt" name="kpraFt" placeholder="40" inputmode="decimal" aria-label="Kingpin to tandem center, feet"><em>ft</em><input name="kpraIn" placeholder="0" inputmode="numeric" aria-label="Kingpin to tandem center, inches"><em>in</em></span></label>
           <label><span title="Distance between the two trailer axles (typical 49 in = 4 ft 1 in)">Spread</span><span class="in"><input id="spreadFt" name="spreadFt" value="4" inputmode="numeric" aria-label="Tandem spread, feet"><em>ft</em><input name="spreadIn" value="1" inputmode="numeric" aria-label="Tandem spread, inches"><em>in</em></span></label>
           <label><span>Trailer</span><span class="in"><input id="trailerFt" name="trailerFt" value="53" inputmode="decimal" aria-label="Trailer length"><em>ft</em></span></label>
           <label title="Preview one state's tandem rule"><span>Preview</span><span class="in"><select id="tandemPreview" aria-label="Preview a state's tandem rule"><option value="">Route states</option></select></span></label>
           <div id="tandemStatus" class="tstatus r2"></div>
         </div>
-        <div class="cap" id="subRoute">Routing preferences</div>
-        <div class="checks" id="cardPrefs">
+        <div class="cap" id="subRoute" data-feat="routePrefs">Routing preferences</div>
+        <div class="checks" id="cardPrefs" data-feat="routePrefs">
           <label class="ck" data-cap="avoidTolls"><input type="checkbox" name="avoidTolls">Avoid toll roads<small class="ctag"></small></label>
           <label class="ck" data-cap="considerTraffic"><input type="checkbox" name="considerTraffic" checked>Consider traffic<small class="ctag"></small></label>
           <label class="ck" data-cap="avoidFerries"><input type="checkbox" name="avoidFerries">Avoid ferries<small class="ctag"></small></label>
@@ -109,16 +109,16 @@
           <label class="ck" data-cap="avoidDirtRoads"><input type="checkbox" name="avoidDirtRoads" checked>Avoid dirt roads<small class="ctag"></small></label>
           <label class="ck" data-cap="avoidSharpTurns"><input type="checkbox" name="avoidSharpTurns">Avoid sharp turns<small class="ctag"></small></label>
         </div>
-        <div id="capNote" class="note hidden"></div>
+        <div id="capNote" class="note hidden" data-feat="routePrefs"></div>
         <div class="cap" id="subCosts">Costs</div>
         <div class="kv" id="cardEcon">
-          <label><span>Load rate</span><span class="in"><em>$</em><input id="loadRate" name="loadRate" placeholder="0" inputmode="decimal" aria-label="Load rate"></span></label>
+          <label data-feat="costsAdv"><span>Load rate</span><span class="in"><em>$</em><input id="loadRate" name="loadRate" placeholder="0" inputmode="decimal" aria-label="Load rate"></span></label>
           <label><span>MPG</span><span class="in"><input id="mpg" name="mpg" value="6.5" inputmode="decimal" aria-label="MPG"></span></label>
           <label><span>Fuel price</span><span class="in"><em>$</em><input id="fuelPrice" name="fuelPrice" value="3.80" inputmode="decimal" aria-label="Fuel price per gallon"><em>/gal</em></span></label>
-          <label><span>Fuel source</span><span class="in"><select id="fuelSrc" name="fuelSrc" aria-label="Fuel price source" title="EIA weekly avg: after each trip, set the fuel price to the U.S. EIA weekly on-highway diesel average for the route's regions"><option value="manual">Manual price</option><option value="eia">Use EIA price</option></select></span></label>
-          <label><span>Fuel type</span><span class="in"><select name="fuel" aria-label="Fuel type"><option value="diesel">Diesel</option><option value="gasoline">Gasoline</option></select></span></label>
+          <label data-feat="costsAdv"><span>Fuel source</span><span class="in"><select id="fuelSrc" name="fuelSrc" aria-label="Fuel price source" title="EIA weekly avg: after each trip, set the fuel price to the U.S. EIA weekly on-highway diesel average for the route's regions"><option value="manual">Manual price</option><option value="eia">Use EIA price</option></select></span></label>
+          <label data-feat="costsAdv"><span>Fuel type</span><span class="in"><select name="fuel" aria-label="Fuel type"><option value="diesel">Diesel</option><option value="gasoline">Gasoline</option></select></span></label>
           <label><span>Per mile</span><span class="in"><em>$</em><input id="costPerMile" name="costPerMile" value="0.80" inputmode="decimal" aria-label="Cost per mile"><em>/mi</em></span></label>
-          <label><span>Per hour</span><span class="in"><em>$</em><input id="costPerHour" name="costPerHour" value="0" inputmode="decimal" aria-label="Cost per hour"><em>/hr</em></span></label>
+          <label data-feat="costsAdv"><span>Per hour</span><span class="in"><em>$</em><input id="costPerHour" name="costPerHour" value="0" inputmode="decimal" aria-label="Cost per hour"><em>/hr</em></span></label>
         </div>
       </div>
     </section>
@@ -138,26 +138,26 @@
           <tr><td class="i"><i data-i="truck"></i></td><td class="l">Driving</td><td class="v" id="resDrive"></td><td class="i i2"><i data-i="tag"></i></td><td class="l">Fixed</td><td class="r" id="resFixed"></td></tr>
           <tr class="tot"><td class="i"></td><td class="l"></td><td class="v"></td><td class="i i2"><i data-i="receipt"></i></td><td class="l">Total</td><td class="r" id="resTotal"></td></tr>
         </tbody></table>
-        <div class="xline pos hidden" id="resProfit"></div>
-        <div class="xline red hidden" id="resAlert"></div>
+        <div class="xline pos hidden" id="resProfit" data-feat="costsAdv"></div>
+        <div class="xline red hidden" id="resAlert" data-feat="tandemUi"></div>
         <div class="foot" id="resNote"></div>
       </div>
     </section>
     <section aria-label="Trip reports">
-      <h3 class="sbar">Trip Reports</h3>
-      <div class="grid3 rg" id="reportGrid">
-        <button type="button" class="rb" data-report="legs">Legs Itinerary</button>
-        <button type="button" class="rb" data-report="states">State Mileage</button>
-        <button type="button" class="rb" data-report="tandem">Tandem Rules</button>
-        <button type="button" class="rb" data-report="directions">Directions</button>
-        <button type="button" class="rb" data-report="tolls">Tolls &amp; Warnings</button>
-        <button type="button" class="rb" data-report="costs">Load Economics</button>
-        <button type="button" class="rb" data-report="settings">Trip Settings</button>
-        <button type="button" class="rb" data-report="note">Driver Note</button>
-        <button type="button" class="rb" data-report="stops">Truck Stops &amp; Fuel</button>
-        <button type="button" class="rb" data-report="ifta">IFTA Estimate</button>
-        <button type="button" class="rb" data-report="send">Send to Driver</button>
-        <button type="button" class="rb" data-report="full">Print / Full Report</button>
+      <h3 class="sbar" data-feat-any="#reportGrid">Trip Reports</h3>
+      <div class="grid3 rg" id="reportGrid" data-feat-any>
+        <button type="button" class="rb" data-report="legs" data-feat="legs">Legs Itinerary</button>
+        <button type="button" class="rb" data-report="states" data-feat="states">State Mileage</button>
+        <button type="button" class="rb" data-report="tandem" data-feat="tandem">Tandem Rules</button>
+        <button type="button" class="rb" data-report="directions" data-feat="directions">Directions</button>
+        <button type="button" class="rb" data-report="tolls" data-feat="tolls">Tolls &amp; Warnings</button>
+        <button type="button" class="rb" data-report="costs" data-feat="costs">Load Economics</button>
+        <button type="button" class="rb" data-report="settings" data-feat="settings">Trip Settings</button>
+        <button type="button" class="rb" data-report="note" data-feat="note">Driver Note</button>
+        <button type="button" class="rb" data-report="stops" data-feat="stops">Truck Stops &amp; Fuel</button>
+        <button type="button" class="rb" data-report="ifta" data-feat="ifta">IFTA Estimate</button>
+        <button type="button" class="rb" data-report="send" data-feat="send">Send to Driver</button>
+        <button type="button" class="rb" data-report="full" data-feat="full">Print / Full Report</button>
       </div>
       <div class="grid3 btnrow back" id="backRow">
         <button type="button" class="btn run" id="backBtn" title="Back to the trip inputs (everything is kept)">Go Back</button>
@@ -166,14 +166,14 @@
     </section>
   </div>
   </div>
-  <p class="fine"><i data-i="warn"></i><span>Estimates only. Before dispatch, check posted signs, clearances, weight and hazmat limits, tandem rules, permits and road conditions.</span></p>
+  <p class="fine"><i data-i="warn"></i><span>Estimates only. Before dispatch, check posted signs, clearances, weight and hazmat limits, tandem rules, permits and road conditions.</span><span class="ver" id="verTxt">v0.10.0</span></p>
 </form>
 
 <!-- report panel (docked over the map, right side) -->
 <aside id="detailsDrawer" class="drawer hidden" aria-label="Trip report" role="dialog">
   <div class="dbar"><span id="drawerIcon"></span><h4 id="drawerTitle">Trip report</h4><span class="sp"></span>
-    <button type="button" class="dbtn" id="copyNoteBtn" data-copy><i data-i="note"></i>Copy driver note</button>
-    <button type="button" class="dbtn" id="printBtn"><i data-i="print"></i>Print</button>
+    <button type="button" class="dbtn" id="copyNoteBtn" data-feat="note" data-copy><i data-i="note"></i>Copy driver note</button>
+    <button type="button" class="dbtn" id="printBtn" data-feat="full"><i data-i="print"></i>Print</button>
     <button type="button" class="x" id="detailsClose" title="Close (Esc)" aria-label="Close report"><i data-i="close"></i></button></div>
   <div class="details" id="resDetails"></div>
 </aside>
@@ -186,19 +186,17 @@
   <div class="dact"><button type="button" class="btn gry sm" id="tripExport">Export JSON</button><button type="button" class="btn gry sm" id="tripImportBtn">Import JSON</button><input type="file" id="tripImport" accept=".json,application/json" hidden></div>
   <div class="tdisc">Trips are saved in this browser only. Export to back them up or move them to another computer.</div>
 </dialog>
-<script src="vendor/leaflet/leaflet.js?v=0.9.2"></script>
-<script src="js/calc.js?v=0.9.2"></script>
-<script src="js/tandem.js?v=0.9.2"></script>
-<script src="js/stops.js?v=0.9.2"></script>
-<script src="js/icons.js?v=0.9.2"></script>
-<script src="js/ifta.js?v=0.9.2"></script>
-<script src="js/eia.js?v=0.9.2"></script>
-<script src="js/hos.js?v=0.9.2"></script>
-<script src="js/trips.js?v=0.9.2"></script>
-<script src="vendor/qrcode-generator.js?v=0.9.2"></script>
-<script src="config.js?v=0.9.2"></script>
-<script src="js/zr-lib.js?v=0.9.2"></script>
-<script src="js/static-api.js?v=0.9.2"></script>
-<script src="js/app.js?v=0.9.2"></script>
+<script src="vendor/leaflet/leaflet.js?v=0.10.0"></script>
+<script src="js/calc.js?v=0.10.0"></script>
+<script src="js/tandem.js?v=0.10.0"></script>
+<script src="js/stops.js?v=0.10.0"></script>
+<script src="config.js?v=0.10.0"></script>
+<script src="js/features.js?v=0.10.0"></script>
+<script src="js/gate.js?v=0.10.0"></script>
+<script src="js/icons.js?v=0.10.0"></script>
+<script src="js/trips.js?v=0.10.0"></script>
+<script src="js/zr-lib.js?v=0.10.0"></script>
+<script src="js/static-api.js?v=0.10.0"></script>
+<script src="js/app.js?v=0.10.0"></script>
 </body>
 </html>

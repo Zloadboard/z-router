@@ -92,3 +92,64 @@
   function stateOffset(code, ms) { if (STD[code] == null) return null; return (STD[code] + (code !== 'AZ' && usDst(ms) ? 1 : 0)) * 60; }
   return { plan: plan, stateOffset: stateOffset, RULES: RULES, offsetMin: offsetMin, localToMs: localToMs, msToLocal: msToLocal };
 });
+
+;
+/* Z Router feature module: HOS planner and appointment times. Loaded as a normal script on the desktop app; on the Pages build it is a hash-named file that is
+ * fetched only after owner unlock or when the owner enabled the feature for visitors (see public/js/features.js, README). */
+(window.ZRXQ = window.ZRXQ || []).push(['hos', function (X) {
+  'use strict';
+  var hosPrefs = X.hosPrefs, apptStore = X.apptStore, apptKey = X.apptKey, state = X.state, $ = X.$, $$ = X.$$, fmtAt = X.fmtAt, esc = X.esc, short = X.short, mi = X.mi, tzName = X.tzName, msIso = X.msIso, C = X.C, can = X.can;
+  var HOS = window.ZRHos;
+  /** Plan with the route's legs; each stop keeps its own UTC offset (from the provider's arrival times). */
+  function hosRun(res) {
+    var r = res.route, hp = hosPrefs(), ap = apptStore(), off0 = HOS.offsetMin(r.departureTime) || 0, offs = [];
+    var appts = r.legs.map(function (l, i) { var o = HOS.offsetMin(l.arrivalTime); offs.push(o == null ? off0 : o); var v = ap[apptKey(i, l)]; return v ? HOS.localToMs(v, offs[i]) : null; });
+    var plan = HOS.plan({ legs: r.legs.map(function (l) { return { miles: l.miles, durationSec: l.durationSec, to: l.to }; }), departMs: Date.parse(r.departureTime) || Date.now(),
+      hoursUsed: hp.used, cycleHours: hp.cycle, dwellMin: hp.dwell, appts: appts });
+    plan.offs = offs; plan.off0 = off0; plan.prefs = hp; plan.apptLocal = r.legs.map(function (l, i) { return ap[apptKey(i, l)] || ''; });
+    return plan;
+  }
+  var EV_LABEL = { drive: 'Drive', break: '30-min break', rest: '10-h off duty', restart: '34-h restart', wait: 'Wait (appointment)', stop: 'On duty at stop' };
+  function renderHos() {
+    var res = state.lastResult, box = $('#hosPlan'); if (!res || !box) return;
+    if (!can('hos')) { box.innerHTML = ''; return; }
+    var P = hosRun(res), hp = P.prefs, r = res.route;
+    var a = $('#hosArrive'); if (a) { a.textContent = fmtAt(P.arriveMs, P.offs[P.offs.length - 1]); $('#hosArriveTz').textContent = P.totals.breaks + ' break' + (P.totals.breaks === 1 ? '' : 's') + ', ' + P.totals.rests + ' rest' + (P.totals.rests === 1 ? '' : 's') + (P.totals.restarts ? ', ' + P.totals.restarts + ' restart' : ''); }
+    var h = '<h5>HOS planner</h5><div class="hosin">' +
+      '<label><b>Hours used</b><input type="number" id="hosUsed" min="0" max="70" step="0.5" value="' + hp.used + '"></label>' +
+      '<label><b>Cycle</b><select id="hosCycle"><option value="70"' + (+hp.cycle === 70 ? ' selected' : '') + '>70 h / 8 days</option><option value="60"' + (+hp.cycle === 60 ? ' selected' : '') + '>60 h / 7 days</option></select></label>' +
+      '<label><b>Min at stop</b><input type="number" id="hosDwell" min="0" max="600" step="15" value="' + hp.dwell + '"></label></div>';
+    h += '<table class="tbl hosstops"><thead><tr><th>Stop</th><th>Appointment</th><th class="n">HOS ETA</th><th class="n">Status</th></tr></thead><tbody>';
+    P.stops.forEach(function (st, i) {
+      var off = P.offs[i], cls = st.status === 'late' ? 'over' : st.status === 'tight' ? 'tight' : st.status ? 'ok' : '';
+      var txt = st.status === 'late' ? 'Late ' + C.formatDuration(st.lateMin * 60) : st.status === 'tight' ? 'Tight (' + st.waitMin + ' min early)' : st.status ? 'On time' + (st.waitMin ? ', ' + C.formatDuration(st.waitMin * 60) + ' early' : '') : '<span class="muted">—</span>';
+      h += '<tr><td><b>' + (i + 1) + '. ' + esc(short(st.label)) + '</b><div class="muted tiny">Mile ' + mi(st.mile) + ' · ' + esc(tzName(msIso(st.etaMs, off))) + '</div></td>' +
+        '<td><input type="datetime-local" class="appt" data-i="' + i + '" value="' + esc(P.apptLocal[i]) + '" aria-label="Appointment at stop ' + (i + 1) + ', local time"></td>' +
+        '<td class="n">' + fmtAt(st.etaMs, off) + '</td><td class="n"><span class="' + cls + '">' + txt + '</span></td></tr>';
+    });
+    h += '</tbody></table><table class="tbl hostl"><thead><tr><th>Start</th><th>Activity</th><th class="n">Mile</th><th class="n">Length</th></tr></thead><tbody>';
+    var legEnd = [], acc = 0; r.legs.forEach(function (l) { acc += l.miles; legEnd.push(acc); });
+    var runs = res.states || [];
+    var offAt = function (m, ms) {
+      for (var j = 0; j < runs.length; j++) if (runs[j].code && m >= runs[j].startMile - 0.5 && m <= runs[j].endMile + 0.5) { var so = HOS.stateOffset(runs[j].code, ms); if (so != null) return so; }
+      for (var k = 0; k < legEnd.length; k++) if (m <= legEnd[k] + 0.05) return P.offs[k]; return P.offs[P.offs.length - 1];
+    };
+    P.events.forEach(function (e) {
+      h += '<tr' + (e.type !== 'drive' ? ' class="hosoff"' : '') + '><td>' + fmtAt(e.start, e.mile0 < 0.5 ? P.off0 : offAt(e.mile0, e.start)) + '</td><td>' + (e.type === 'drive' ? '<b>Drive</b> ' + mi(e.mile1 - e.mile0) + ' mi' : esc(e.note || EV_LABEL[e.type])) +
+        '</td><td class="n">' + mi(e.mile0) + '</td><td class="n">' + C.formatDuration((e.end - e.start) / 1000) + '</td></tr>';
+    });
+    h += '</tbody></table><div class="tdisc">FMCSA property-carrying rules: 11 h driving, 14 h window, 30-min break after 8 h driving, 10 h off duty, ' + hp.cycle + ' h cycle (34 h restart). After this trip: ' +
+      P.driveLeftH + ' h driving left in the shift, ' + P.cycleLeftH + ' h left in the cycle. Appointments are local time at the stop. Planning aid only, not a log; traffic and stops change the times.</div>';
+    box.innerHTML = h;
+    var save = function () {
+      localStorage.setItem('zr.hos', JSON.stringify({ used: Math.max(0, Math.min(+$('#hosCycle').value, +$('#hosUsed').value || 0)), cycle: +$('#hosCycle').value, dwell: Math.max(0, +$('#hosDwell').value || 0) }));
+      renderHos();
+    };
+    ['#hosUsed', '#hosCycle', '#hosDwell'].forEach(function (id) { $(id).addEventListener('change', save); });
+    $$('input.appt', box).forEach(function (el) { el.addEventListener('change', function () {
+      var ap = apptStore(), i = +el.dataset.i, k = apptKey(i, r.legs[i]); if (el.value) ap[k] = el.value; else delete ap[k];
+      localStorage.setItem('zr.appts', JSON.stringify(ap)); renderHos();
+    }); });
+  }
+  X.F.renderHos = renderHos; X.F.hosRun = hosRun;
+}]);

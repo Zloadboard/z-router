@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "note": "Which features regular visitors see. Edit with the Owner panel or tools/set-features.js; see README.",
+  "visitors": {
+    "legs": false,
+    "states": false,
+    "tandem": false,
+    "directions": false,
+    "tolls": false,
+    "costs": false,
+    "settings": false,
+    "note": false,
+    "stops": false,
+    "ifta": false,
+    "send": false,
+    "full": false,
+    "hos": false,
+    "trips": false,
+    "tollMap": false,
+    "tandemUi": false,
+    "routePrefs": false,
+    "costsAdv": false
+  }
+}

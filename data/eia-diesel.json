@@ -1,19 +1,19 @@
 {
  "source": "U.S. Energy Information Administration, weekly retail on-highway diesel (all types, incl. taxes)",
  "url": "https://www.eia.gov/petroleum/gasdiesel/",
- "week": "2026-10-05",
+ "week": "2026-10-12",
  "prices": {
-  "US": 6.199,
-  "P1": 5.951,
-  "P1A": 6.476,
-  "P1B": 6.485,
-  "P1C": 5.699,
-  "P2": 6.286,
-  "P3": 5.819,
-  "P4": 6.267,
-  "P5": 7.229,
-  "P5XCA": 6.49,
-  "CA": 8.082
+  "US": 6.179,
+  "P1": 5.908,
+  "P1A": 6.441,
+  "P1B": 6.471,
+  "P1C": 5.645,
+  "P2": 6.259,
+  "P3": 5.809,
+  "P4": 6.302,
+  "P5": 7.24,
+  "P5XCA": 6.503,
+  "CA": 8.091
  },
- "fetchedAt": "2026-10-13T23:10:19.533Z"
+ "fetchedAt": "2026-10-15T00:51:52.947Z"
 }

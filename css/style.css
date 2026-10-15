@@ -451,5 +451,6 @@ a.btn{display:inline-flex;align-items:center;justify-content:center;text-decorat
 .xdpop .xdprice{color:#5b21b6;font-weight:600}
 .xdpop button{margin:6px 4px 0 0}
 .ownshow{padding:2px 14px 4px}
+#ownerDlg .ownwarn{border-left:3px solid #b45309;margin-left:var(--pad);padding:0 var(--pad) 0 8px}
 @media (max-width:900px){.dlgrow input{font-size:16px} /* iOS Safari zooms into smaller inputs */}
 @media (min-width:901px) and (max-width:1200px){.mapctl{flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - var(--side) - 64px)}}

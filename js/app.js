@@ -781,7 +781,7 @@
     if (state.trafficOn) setTrafficLayer(false, true);
     var b = $('#trafficLayerBtn'); if (!b) return;
     b.disabled = true; b.classList.remove('on'); b.setAttribute('aria-pressed', 'false'); b.classList.add('trf-na');
-    b.title = why || 'Live traffic is not available with this API key (the Traffic API is not enabled on it).';
+    b.title = 'Live traffic is unavailable: ' + (why || 'the Traffic API is not enabled on this key') + '. Tick Traffic on the key in the TomTom developer portal.';
     if (!quiet && state.trafficOn !== false) toast('Traffic layer is not available: ' + (why || 'Traffic API not enabled on this key'));
   }
   function trafficTiles() {
@@ -1543,7 +1543,7 @@
     try { var raw = localStorage.getItem(XD_KEY); if (raw) list = JSON.parse(raw); } catch (e) { list = null; }
     if (Array.isArray(list)) return Promise.resolve({ list: list, from: 'board' });
     if (xd.defaults) return Promise.resolve({ list: xd.defaults, from: 'default' });
-    return fetch('data/crossdocks-default.json?v=0.11.0').then(function (r) { return r.json(); })
+    return fetch('data/crossdocks-default.json?v=0.11.1').then(function (r) { return r.json(); })
       .then(function (j) { xd.defaults = Array.isArray(j) ? j : []; return { list: xd.defaults, from: 'default' }; })
       .catch(function () { return { list: [], from: 'none' }; });
   }

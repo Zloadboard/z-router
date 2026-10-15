@@ -31,6 +31,9 @@
       return res.text().then(function (text) {
         var body = null; try { body = JSON.parse(text); } catch (e) { /* XML / empty */ }
         if (res.ok) return body;
+        if (res.status === 403 && body && body.detailedError && body.detailedError.code === 'InsufficientFunds') {
+          throw ProviderError('TomTom address search is out of credits on this key, so only built-in city and ZIP lookups work. Type "City, ST" or a ZIP, or add TomTom credits for street addresses.', 502, 'PROVIDER_CREDITS');
+        }
         if (res.status === 401 || res.status === 403) {
           throw ProviderError('TomTom rejected the API key (HTTP ' + res.status + '). Check that the key is valid, has this API enabled and allows this website (' + location.origin + ').', 502, 'PROVIDER_AUTH');
         }
@@ -53,7 +56,11 @@
       // TomTom map tiles are used only if that tile loads; otherwise the free tiles are used, silently.
       var s = tomtom.buildSearchRequest({ q: 'Chicago, IL', typeahead: false, limit: 1 });
       keyCheckP = Promise.all([providerGet(s.url, s.params), probeTiles(), probeTraffic()]).then(function () { keyCheck.status = 'ok'; keyCheck.message = null; })
-        .catch(function (e) { keyCheck.status = e.code === 'PROVIDER_AUTH' ? 'rejected' : 'error'; keyCheck.message = e.message; });
+        .catch(function (e) {
+          // Out of Search credits is not a broken key: routing still works and cities/ZIPs come from the built-in list.
+          if (e.code === 'PROVIDER_CREDITS') { keyCheck.status = 'ok'; keyCheck.message = null; keyCheck.searchCredits = false; return; }
+          keyCheck.status = e.code === 'PROVIDER_AUTH' ? 'rejected' : 'error'; keyCheck.message = e.message;
+        });
     }
     return keyCheckP;
   }
@@ -94,11 +101,35 @@
   }
 
   // ---------- search ----------
-  function suggest(q, at) { var r = tomtom.buildSearchRequest({ q: q, at: at }); return providerGet(r.url, r.params).then(tomtom.normalizeSearch); }
+  var places = window.ZRPlaces || null;
+  function tomtomSuggest(q, at) { var r = tomtom.buildSearchRequest({ q: q, at: at }); return providerGet(r.url, r.params).then(tomtom.normalizeSearch); }
+  // Cities and ZIPs come from the built-in list first (free, instant); street addresses and no-match go to TomTom.
+  function suggest(q, at) {
+    if (!places) return tomtomSuggest(q, at);
+    return places.suggest(q, at).catch(function () { return null; }).then(function (local) {
+      if (local && local.length) return local;
+      return tomtomSuggest(q, at).catch(function (e) { if (local) return []; throw e; });
+    });
+  }
   // typed text without a picked suggestion -> TomTom fuzzy Search (the Pages key has no Geocoding API)
   // opts.idx: TomTom index set (e.g. 'Geo' = cities only, 'PAD,Addr,Str' = street addresses only, no businesses);
   // opts.at: "lat,lng" to search near (v0.9.4, used to place crossdock partners exactly)
   function geocode(q, opts) {
+    opts = opts || {};
+    if (!places) return tomtomGeocode(q, opts);
+    var exact = !!(opts.at || opts.idx); // crossdock pins: try the street address first
+    var first = exact ? Promise.resolve(null) : places.lookup(q).catch(function () { return null; });
+    return first.then(function (hit) {
+      if (hit) return hit;
+      return tomtomGeocode(q, opts).catch(function (e) {
+        // TomTom cannot answer (no credits, network): fall back to the city in the text, if there is one.
+        return (exact ? places.lookup(q).catch(function () { return null; }) : Promise.resolve(null)).then(function (h) {
+          return h || places.cityOf(q).catch(function () { return null; });
+        }).then(function (h) { if (h) return h; throw e; });
+      });
+    });
+  }
+  function tomtomGeocode(q, opts) {
     opts = opts || {};
     var s = tomtom.buildSearchRequest({ q: q, typeahead: false, limit: 1, at: opts.at || null });
     if (opts.idx && /^[A-Za-z,]{2,40}$/.test(opts.idx)) s.params.set('idxSet', opts.idx);

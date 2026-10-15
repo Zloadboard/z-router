@@ -36,7 +36,7 @@
 <!-- map controls (over the map, below the top bar) -->
 <div class="mapctl">
   <div class="mc seg"><button type="button" class="view-btn on" data-view="map">Map</button><button type="button" class="view-btn" data-view="terrain">Terrain</button><button type="button" class="view-btn" data-view="satellite">Satellite</button></div>
-  <div class="mc seg" data-feat-any><button type="button" id="tollLayerBtn" data-feat="tollMap" class="on" aria-pressed="true" title="Show / hide expensive toll roads (5-axle $/mile estimate)">Tolls</button><button type="button" id="restLayerBtn" data-feat="stops" aria-pressed="false" title="Show / hide rest areas and service plazas (OpenStreetMap; truck parking where tagged)">Rest areas</button></div>
+  <div class="mc seg" data-feat-any><button type="button" id="tollLayerBtn" data-feat="tollMap" class="on" aria-pressed="true" title="Show / hide expensive toll roads (5-axle $/mile estimate)">Tolls</button><button type="button" id="restLayerBtn" data-feat="stops" aria-pressed="false" title="Show / hide rest areas and service plazas (OpenStreetMap; truck parking where tagged)">Rest areas</button><button type="button" id="xdLayerBtn" data-feat="crossdocks" aria-pressed="false" title="Show / hide your crossdock partners (the list in the Freight Board's Crossdock section)">Crossdocks</button></div>
   <div class="mc"><button type="button" id="fitBtn" title="Fit route"><i data-i="expand"></i></button></div>
 </div>
 <div id="keyBanner" class="banner hidden"></div>
@@ -113,6 +113,7 @@
         <div class="cap" id="subCosts">Costs</div>
         <div class="kv" id="cardEcon">
           <label data-feat="costsAdv"><span>Load rate</span><span class="in"><em>$</em><input id="loadRate" name="loadRate" placeholder="0" inputmode="decimal" aria-label="Load rate"></span></label>
+          <label data-feat="costsAdv"><span title="Empty miles inside this trip. Use when Start is where the truck is now and Stop 1 is the pickup: cost counts all miles, rate per loaded mile leaves the empty leg out.">Deadhead</span><span class="in"><select id="deadhead" name="deadhead" aria-label="Deadhead"><option value="">None</option><option value="leg1">1st leg empty</option></select></span></label>
           <label><span>MPG</span><span class="in"><input id="mpg" name="mpg" value="6.5" inputmode="decimal" aria-label="MPG"></span></label>
           <label><span>Fuel price</span><span class="in"><em>$</em><input id="fuelPrice" name="fuelPrice" value="3.80" inputmode="decimal" aria-label="Fuel price per gallon"><em>/gal</em></span></label>
           <label data-feat="costsAdv"><span>Fuel source</span><span class="in"><select id="fuelSrc" name="fuelSrc" aria-label="Fuel price source" title="EIA weekly avg: after each trip, set the fuel price to the U.S. EIA weekly on-highway diesel average for the route's regions"><option value="manual">Manual price</option><option value="eia">Use EIA price</option></select></span></label>

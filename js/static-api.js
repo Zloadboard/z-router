@@ -88,8 +88,12 @@
   // ---------- search ----------
   function suggest(q, at) { var r = tomtom.buildSearchRequest({ q: q, at: at }); return providerGet(r.url, r.params).then(tomtom.normalizeSearch); }
   // typed text without a picked suggestion -> TomTom fuzzy Search (the Pages key has no Geocoding API)
-  function geocode(q) {
-    var s = tomtom.buildSearchRequest({ q: q, typeahead: false, limit: 1 });
+  // opts.idx: TomTom index set (e.g. 'Geo' = cities only, 'PAD,Addr,Str' = street addresses only, no businesses);
+  // opts.at: "lat,lng" to search near (v0.9.4, used to place crossdock partners exactly)
+  function geocode(q, opts) {
+    opts = opts || {};
+    var s = tomtom.buildSearchRequest({ q: q, typeahead: false, limit: 1, at: opts.at || null });
+    if (opts.idx && /^[A-Za-z,]{2,40}$/.test(opts.idx)) s.params.set('idxSet', opts.idx);
     return providerGet(s.url, s.params).then(function (j) { var hit = tomtom.normalizeSearch(j)[0]; return common.plausibleHit(q, hit) ? { label: hit.label, lat: hit.lat, lng: hit.lng } : null; });
   }
 
@@ -185,7 +189,8 @@
       costs = costsFor(r.route, truck);
       return routeStatesAndTandem(r.route, truck, warnings);
     }).then(function (st) {
-      var economics = calc.computeEconomics({ loadRate: truck.loadRate, miles: r.route.totals.miles, totalCost: costs.totalCost });
+      var dhMiles = truck.deadhead === 'leg1' && r.route.legs.length > 1 ? r.route.legs[0].miles : 0;
+      var economics = calc.computeEconomics({ loadRate: truck.loadRate, miles: r.route.totals.miles, totalCost: costs.totalCost, deadheadMiles: dhMiles });
       var hos = calc.hosEstimate(r.route.totals.durationSec);
       if (r.route.departureTime) hos.arrivalTime = calc.addSecondsIso(r.route.departureTime, hos.totalSec, r.route.arrivalTime || r.route.departureTime);
       var params = r.requestParams, pobj = {};
@@ -234,7 +239,7 @@
         var ll = common.parseLatLngText(g);
         if (ll) return reply(200, { ok: true, item: { label: g, lat: ll.lat, lng: ll.lng } });
         if (!KEY) return reply(503, { ok: false, code: 'API_KEY_MISSING', error: KEY_MISSING });
-        return geocode(g).then(function (item) { return item ? reply(200, { ok: true, item: item }) : reply(404, { ok: false, code: 'NOT_FOUND', error: 'No match for "' + g + '"' }); });
+        return geocode(g, { idx: u.searchParams.get('idx') || '', at: u.searchParams.get('at') || '' }).then(function (item) { return item ? reply(200, { ok: true, item: item }) : reply(404, { ok: false, code: 'NOT_FOUND', error: 'No match for "' + g + '"' }); });
       }
       if (p === '/api/diesel') { // eia.gov sends no CORS headers, so the static site uses the snapshot bundled at build time
         return realFetch('data/eia-diesel.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {

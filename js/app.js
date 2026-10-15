@@ -88,11 +88,13 @@
   // ---------- form ----------
   function field(name) { return $('#tripForm').elements[name]; }
   var TRUCK_FIELDS = ['fuelSrc', 'type', 'axleCount', 'hazmat', 'heightFt', 'heightIn', 'lengthFt', 'lengthIn', 'widthFt', 'widthIn', 'weightLbs',
-    'maxSpeedMph', 'trailerFt', 'kpraFt', 'kpraIn', 'spreadFt', 'spreadIn', 'fuel', 'mpg', 'fuelPrice', 'costPerMile', 'costPerHour', 'loadRate'];
+    'maxSpeedMph', 'trailerFt', 'kpraFt', 'kpraIn', 'spreadFt', 'spreadIn', 'fuel', 'mpg', 'fuelPrice', 'costPerMile', 'costPerHour', 'loadRate', 'deadhead'];
+  // Per-trip fields: never saved in the browser, so one load's rate never shows up as the next trip's profit.
+  var TRIP_ONLY = { loadRate: 1, deadhead: 1 };
   var PROFILE_FIELDS = ['type', 'axleCount', 'hazmat', 'heightFt', 'heightIn', 'lengthFt', 'lengthIn', 'widthFt', 'widthIn', 'weightLbs', 'maxSpeedMph',
     'trailerFt', 'kpraFt', 'kpraIn', 'spreadFt', 'spreadIn', 'mpg'];
   var PREF_CHECKS = ['avoidTolls', 'avoidFerries', 'avoidTunnels', 'avoidDirtRoads', 'reorderStops', 'considerTraffic', 'seasonalClosures', 'avoidSharpTurns'];
-  var ECON_FIELDS = { mpg: 1, fuelPrice: 1, costPerMile: 1, costPerHour: 1, loadRate: 1, fuel: 1 };
+  var ECON_FIELDS = { mpg: 1, fuelPrice: 1, costPerMile: 1, costPerHour: 1, loadRate: 1, fuel: 1, deadhead: 1 };
   var TANDEM_FIELDS = { kpraFt: 1, kpraIn: 1, spreadFt: 1, spreadIn: 1, trailerFt: 1, type: 1 };
 
   function readTruck() {
@@ -132,7 +134,8 @@
   function saveSettings() {
     try {
       var p = readPrefs(); delete p.departDate; delete p.departTime;
-      localStorage.setItem(STORE_KEY, JSON.stringify({ truck: readTruck(), prefs: p, preset: $('#preset').value }));
+      var t = readTruck(); Object.keys(TRIP_ONLY).forEach(function (k) { delete t[k]; });
+      localStorage.setItem(STORE_KEY, JSON.stringify({ truck: t, prefs: p, preset: $('#preset').value }));
     } catch (e) { /* storage unavailable */ }
   }
   function loadSettings() {
@@ -251,7 +254,7 @@
     var rows = visibleRows(), next = move === 'run' ? null : nextTabRow(row);
     if (next) $('input', next).focus(); else $('#runBtn').focus();
   }
-  /** v0.9.2 Tab order: skip empty middle boxes; the next filled middle box or End; Run Trip when End is filled. */
+  /** v0.9.5 Tab order: next box down; from an empty stop box, End (or Run Trip when End is filled). */
   function nextTabRow(row) {
     var rows = visibleRows(), vals = rows.map(function (r) { return !!$('input', r).value.trim(); });
     var k = S.nextTab(vals, rows.indexOf(row));
@@ -820,6 +823,7 @@
   function clearRoute() {
     state.routeLayer.clearLayers(); state.markerLayer.clearLayers(); state.warnLayer.clearLayers(); state.actionLayer.clearLayers(); state.stopsLayer.clearLayers(); state.stopsShown = null;
     state.lastResult = null;
+    if (typeof xdDraw === 'function' && state.xdLayer) xdDraw();
   }
   /** Point at `mile` along the route polyline (scaled to the provider's total miles). */
   function pointAtMile(res, mile) {
@@ -955,6 +959,7 @@
     renderDetails(res);
     onTandemInput();
     showView('results'); // the results view replaces the planning view
+    xdDraw(); // crossdock markers: distance from this route
     fitRoute();
   }
 
@@ -1010,7 +1015,7 @@
     set('resTotal', money(c.totalCost), '$' + c.totalPerMile.toFixed(2) + '/mi' + (noToll ? ', excluding tolls' : ''));
     var pf = $('#resProfit');
     pf.classList.toggle('hidden', !ec);
-    if (ec) { pf.className = 'xline ' + (ec.profit >= 0 ? 'pos' : 'red'); pf.innerHTML = ICON('chart') + '<span>Net profit ' + money(ec.profit) + '</span>'; pf.title = ec.margin + '% margin · $' + ec.ratePerMile.toFixed(2) + '/mi rate (Load Economics report)'; }
+    if (ec) { pf.className = 'xline ' + (ec.profit >= 0 ? 'pos' : 'red'); pf.innerHTML = ICON('chart') + '<span>Net profit ' + money(ec.profit) + '</span>'; pf.title = ec.margin + '% margin · $' + ec.ratePerMile.toFixed(2) + '/mi rate' + (ec.ratePerLoadedMile != null ? ' · $' + ec.ratePerLoadedMile.toFixed(2) + '/loaded mi (' + mi(ec.deadheadMiles) + ' mi empty)' : '') + ' (Load Economics report)'; }
     $('#resNote').textContent = noToll ? '* ' + pl + ' has no toll prices (' + mi(r.tolls.miles || 0, 1) + ' toll mi); Total excludes tolls.' : estToll ? (r.tolls.total > 0 ? '* Toll estimate: ' + mi(r.tolls.miles || 0, 0) + ' toll mi at avg truck rates; cash may differ.' : '') : r.tolls.estimated && !zeroToll ? '* Toll cost is an estimate.' : '';
     renderAlertLine(res);
   }
@@ -1083,6 +1088,7 @@
     if (res.reordered) li('Stop order', 'Re-ordered for the best sequence (' + (res.provider === 'tomtom' ? 'TomTom computeBestOrder' : 'HERE Waypoints Sequence') + ')');
     var nn = r.notices.length + (res.warnings || []).length;
     li('Notices', nn ? nn + ' (see the Tolls &amp; warnings report)' : 'None');
+    var xdn = xdTripNote(res); if (xdn) li('Crossdocks', xdn);
     return '<ul class="plain">' + out.join('') + '</ul>';
   }
   function renderDetails(res) {
@@ -1179,7 +1185,9 @@
       '</tbody><tfoot>' + row3('Trip cost', money(c.totalPerMile) + '/mi', money(c.totalCost));
     if (res.economics) {
       var ec = res.economics;
-      co += row3('Load rate', '', money(ec.revenue)) + row3('Net profit', ec.margin + '% margin · ' + money(ec.ratePerMile) + ' rate/mi · ' + money(ec.profitPerMile) + ' profit/mi', money(ec.profit));
+      co += row3('Load rate', '', money(ec.revenue));
+      if (ec.ratePerLoadedMile != null) co += row3('Deadhead', mi(ec.deadheadMiles, 1) + ' empty mi (leg 1) · ' + mi(ec.loadedMiles, 1) + ' loaded mi', money(ec.ratePerLoadedMile) + '/loaded mi');
+      co += row3('Net profit', ec.margin + '% margin · ' + money(ec.ratePerMile) + ' rate/mi all miles · ' + money(ec.profitPerMile) + ' profit/mi', money(ec.profit));
     }
     co += '</tfoot></table>' + (res.economics ? '' : '<div class="tdisc">Enter a load rate in Truck &amp; Settings → Costs to see profit.</div>') + '</div>';
     co = econCells(res) + co;
@@ -1314,15 +1322,18 @@
     var opts = { mpg: tk.mpg, fuelPrice: tk.fuelPrice, costPerMile: tk.costPerMile, costPerHour: tk.costPerHour };
     res.costs = C.computeCosts(Object.assign({ miles: r.totals.miles, seconds: r.totals.durationSec, tollCost: r.tolls.total }, opts));
     r.legs.forEach(function (l) { l.costs = C.computeCosts(Object.assign({ miles: l.miles, seconds: l.durationSec, tollCost: l.tollCost }, opts)); });
-    res.economics = C.computeEconomics({ loadRate: tk.loadRate, miles: r.totals.miles, totalCost: res.costs.totalCost });
+    res.economics = C.computeEconomics({ loadRate: tk.loadRate, miles: r.totals.miles, totalCost: res.costs.totalCost, deadheadMiles: deadheadMiles(res, tk) });
     renderSummary(res); renderDetails(res);
   }
   /** Net profit / margin / rate per mile / profit per mile cells at the top of the Load Economics report. */
+  /** Empty miles inside the trip: the first leg when "1st leg empty" is chosen and the trip has more than one leg. */
+  function deadheadMiles(res, tk) { return (tk || readTruck()).deadhead === 'leg1' && res.route.legs.length > 1 ? res.route.legs[0].miles : 0; }
   function econCells(res) {
     var ec = res.economics, cell = function (label, value, cls) { return '<div><span>' + label + '</span><b class="' + (cls || '') + '">' + value + '</b></div>'; };
     if (!ec) return '<div class="profit">' + cell('Net profit', '—') + cell('Margin', '—') + cell('Rate / mi', '—') + cell('Profit / mi', '—') + '</div>';
     var sign = ec.profit >= 0 ? 'pos' : 'neg';
-    return '<div class="profit">' + cell('Net profit', money(ec.profit, 0), sign) + cell('Margin', ec.margin + '%') + cell('Rate / mi', '$' + ec.ratePerMile.toFixed(2)) +
+    var rpm = ec.ratePerLoadedMile != null ? cell('Rate / loaded mi', '$' + ec.ratePerLoadedMile.toFixed(2)) : cell('Rate / mi', '$' + ec.ratePerMile.toFixed(2));
+    return '<div class="profit">' + cell('Net profit', money(ec.profit, 0), sign) + cell('Margin', ec.margin + '%') + rpm +
       cell('Profit / mi', (ec.profitPerMile < 0 ? '−$' : '$') + Math.abs(ec.profitPerMile).toFixed(2), sign) + '</div>';
   }
   /** Trip Settings report: the truck, routing preferences and cost inputs this trip was run with. */
@@ -1354,6 +1365,7 @@
   }
   function resetTrip() {
     writeStopList([null, null]);
+    Object.keys(TRIP_ONLY).forEach(function (k) { if (field(k)) field(k).value = ''; });
     clearRoute();
     if (state.searchMarker) { state.map.removeLayer(state.searchMarker); state.searchMarker = null; }
     showView('plan');
@@ -1419,14 +1431,16 @@
     var st = !cfg.configured ? 'bad' : cfg.keyCheck && cfg.keyCheck.status === 'rejected' ? 'bad' : cfg.demo ? 'demo' : 'ok';
     var line = !cfg.configured ? 'No routing key: routing off' : cfg.demo ? 'Demo mode (' + cfg.providerLabel + ' mock)' : st === 'bad' ? cfg.providerLabel + ' key problem' : cfg.providerLabel + ' truck routing';
     $('#provLine').innerHTML = '<span class="pdot ' + st + '">' + ICON(st === 'ok' ? 'check' : st === 'bad' ? 'warn' : 'info') + '</span>' + esc(line);
-    $('#provLine').title = st === 'ok' ? 'Routes, address search and map tiles from ' + cfg.providerLabel + ' (API key stays on the server)' : line;
-    $('#settingsInfo').textContent = (cfg.configured ? 'Routing: ' + cfg.providerLabel + (cfg.demo ? ' (demo)' : '') + ', key on the server.' : 'Routing key not configured on the server.') + ' Settings are saved in this browser.';
+    $('#provLine').title = st === 'ok' ? 'Routes and address search from ' + cfg.providerLabel + (cfg.static ? ' (website key, locked to this site)' : ' (API key stays on the server)') : line;
+    $('#settingsInfo').textContent = (cfg.configured ? 'Routing: ' + cfg.providerLabel + (cfg.demo ? ' (demo)' : '') + (cfg.static ? ', website key locked to this site.' : ', key on the server.') : 'Routing key not configured.') + ' Truck and cost settings are saved in this browser; load rate is not.';
     if (!cfg.configured) showBanner('<b>Routing API key not configured.</b> Showing OpenStreetMap; address search and truck routing turn on once the site is rebuilt with a TomTom key in config.js.');
     else if (cfg.keyCheck && cfg.keyCheck.status === 'rejected') showBanner('<b>' + esc(cfg.providerLabel) + ' API key problem.</b> ' + esc(cfg.keyCheck.message || '') + ' Check the key and its allowed domains in the TomTom developer portal.');
     else if (cfg.demo) showBanner('<b>Demo mode</b> (' + esc(cfg.providerLabel) + ' mock): routes are synthetic, for UI testing only.');
     onTandemInput();
     loadRules().then(onTandemInput);
     openFromHash();
+    initCrossdocks();
+    applyLinkParams();
     booted = true;
     Object.keys(MODS).forEach(function (k) { if (MODS[k].init) MODS[k].init(); });
     window.TruckRouter = { state: state, runTrip: runTrip, setWaypoint: setWaypoint, readTruck: readTruck, readPrefs: readPrefs, renderResult: renderResult,
@@ -1435,6 +1449,174 @@
       setSettingsOpen: setSettingsOpen, writeStopList: writeStopList, can: can };
   }
   var debouncedEcon = debounce(recalcEconomics, 250);
+
+  // ---------- trip links from the Freight Board: open with the stops filled in ----------
+  // ?from=Romeoville, IL&stop=Joliet, IL&to=Dallas, TX&rate=3200&date=2026-10-13&time=14:00&deadhead=leg1&run=1
+  // Each place is text (looked up when the trip runs) or "text@lat,lng". Truck and routing settings are left as they are.
+  // ?xdock=1 turns the Crossdocks layer on and shows all of them.
+  function linkPlace(v) {
+    v = String(v || '').trim(); if (!v) return null;
+    var m = v.match(/^(.*)@\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+    if (m && Math.abs(+m[2]) <= 90 && Math.abs(+m[3]) <= 180) return { label: m[1].trim() || m[2] + ',' + m[3], lat: +m[2], lng: +m[3] };
+    return { label: v.slice(0, 200) };
+  }
+  function applyLinkParams() {
+    var q; try { q = new URLSearchParams(location.search); } catch (e) { return; }
+    var showXd = q.get('xdock') === '1';
+    var from = linkPlace(q.get('from')), to = linkPlace(q.get('to')), stops = q.getAll('stop').map(linkPlace).filter(Boolean);
+    if (showXd && can('crossdocks')) { setXdLayer(true, true); }
+    if (!from && !to && !stops.length) { if (showXd) cleanUrl(); return; }
+    if (stops.length > S.MAX_STOPS) { showMessage('This link has ' + stops.length + ' stops; Z Router takes ' + S.MAX_STOPS + '. The first ' + S.MAX_STOPS + ' were kept.', 'warn'); stops = stops.slice(0, S.MAX_STOPS); }
+    writeStopList([from].concat(stops, [to]));
+    var rate = String(q.get('rate') || '').replace(/[$,\s]/g, '');
+    field('loadRate').value = /^\d+(\.\d+)?$/.test(rate) ? rate : '';
+    if (field('deadhead')) field('deadhead').value = q.get('deadhead') === 'leg1' ? 'leg1' : '';
+    var d = q.get('date'), t = q.get('time');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d || '') && d >= localISO(new Date())) { field('departDate').value = d; if (/^\d{2}:\d{2}$/.test(t || '')) field('departTime').value = t; }
+    updateSummaries();
+    cleanUrl(); // applied once: a reload does not re-run it
+    if (q.get('run') === '1' && from && to) runTrip();
+  }
+  function cleanUrl() { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* ignore */ } }
+
+  // ---------- Crossdocks layer: the partner list from the Freight Board's Crossdock section ----------
+  // Same website as the Freight Board, so its saved list (synced through the Google Sheet) is readable here.
+  // Addresses are looked up once (TomTom search) and remembered in this browser.
+  var XD_KEY = 'fcbv2_xdrop_partners', XD_GEO_KEY = 'zr.xdockGeo.v2'; // v2 (0.9.4): points checked against their city
+  var xd = { list: [], geo: {}, on: false, busy: false, defaults: null };
+  function xdKey(p) { return String(p.addr || p.city || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  function xdLoadGeo() { try { xd.geo = JSON.parse(localStorage.getItem(XD_GEO_KEY) || '{}') || {}; } catch (e) { xd.geo = {}; } }
+  function xdSaveGeo() { try { localStorage.setItem(XD_GEO_KEY, JSON.stringify(xd.geo)); } catch (e) { /* ignore */ } }
+  function xdReadList() {
+    var list = null;
+    try { var raw = localStorage.getItem(XD_KEY); if (raw) list = JSON.parse(raw); } catch (e) { list = null; }
+    if (Array.isArray(list)) return Promise.resolve({ list: list, from: 'board' });
+    if (xd.defaults) return Promise.resolve({ list: xd.defaults, from: 'default' });
+    return fetch('data/crossdocks-default.json?v=0.10.0').then(function (r) { return r.json(); })
+      .then(function (j) { xd.defaults = Array.isArray(j) ? j : []; return { list: xd.defaults, from: 'default' }; })
+      .catch(function () { return { list: [], from: 'none' }; });
+  }
+  /* v0.9.4: 0.9.3 took the first hit of a general search, which can be a business with a similar name far away
+   * (Sturtevant, WI "11201 Enterprise Way" landed off). Now: find the CITY first, then search only street
+   * addresses near it, and keep the address point only if it is within 35 mi of that city; otherwise use the city. */
+  function xdCityText(p) {
+    var c = String(p.city || '').replace(/\(.*?\)/g, '').trim();
+    if (!/,\s*[A-Z]{2}\b/.test(c)) { var m = String(p.addr || '').match(/([A-Za-z .'-]+),\s*([A-Z]{2})\b(?:\s+\d{5})?\s*$/); if (m) c = m[1].trim() + ', ' + m[2]; }
+    return c;
+  }
+  function xdLookup(q, idx, at) {
+    return api('/api/geocode?q=' + encodeURIComponent(q) + (idx ? '&idx=' + idx : '') + (at ? '&at=' + at.lat.toFixed(4) + ',' + at.lng.toFixed(4) : ''))
+      .then(function (j) { return j && j.ok && j.item ? j.item : null; }, function () { return null; });
+  }
+  function xdMiles(a, b) {
+    var R = 3958.8, r = Math.PI / 180, dl = (b.lat - a.lat) * r, dg = (b.lng - a.lng) * r;
+    var h = Math.sin(dl / 2) * Math.sin(dl / 2) + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dg / 2) * Math.sin(dg / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  function xdGeocode(p) {
+    var cityQ = xdCityText(p), addrQ = String(p.addr || '').trim();
+    var cityP = cityQ ? xdLookup(cityQ, 'Geo').then(function (c) { return c || xdLookup(cityQ, ''); }) : Promise.resolve(null);
+    return cityP.then(function (c) {
+      if (!addrQ || addrQ.toLowerCase() === cityQ.toLowerCase()) return c ? { lat: c.lat, lng: c.lng, approx: false, check: 'city' } : null;
+      // strip a leading company name ("Rick Cargo, 300 Brogdon Rd ...") so the street search sees the address
+      var street = addrQ.replace(/^[^,\d]*[A-Za-z][^,\d]*,\s*(?=\d)/, '');
+      return xdLookup(street, 'PAD,Addr,Str', c).then(function (a) {
+        if (a && (!c || xdMiles(a, c) <= 35)) return { lat: a.lat, lng: a.lng, approx: false, check: c ? Math.round(xdMiles(a, c)) + ' mi from city' : 'no city' };
+        if (c) return { lat: c.lat, lng: c.lng, approx: true, check: a ? 'address hit was ' + Math.round(xdMiles(a, c)) + ' mi away; city used' : 'address not found; city used' };
+        return a ? { lat: a.lat, lng: a.lng, approx: false, check: 'no city check' } : null;
+      });
+    });
+  }
+  /** Look up the partners that have no map point yet, one at a time. */
+  function xdLocateMissing() {
+    if (xd.busy) return; var todo = xd.list.filter(function (p) { var g = xd.geo[xdKey(p)]; return xdKey(p) && !(g && (isFinite(g.lat) || g.failedAt > Date.now() - 864e5)); });
+    if (!todo.length) return;
+    xd.busy = true;
+    var i = 0, next = function () {
+      if (i >= todo.length) { xd.busy = false; xdSaveGeo(); xdDraw(); return; }
+      var p = todo[i++];
+      xdGeocode(p).then(function (g) { xd.geo[xdKey(p)] = g ? { lat: g.lat, lng: g.lng, approx: g.approx, check: g.check, at: Date.now() } : { failedAt: Date.now() }; if (i % 5 === 0) { xdSaveGeo(); xdDraw(); } setTimeout(next, 150); });
+    };
+    next();
+  }
+  function xdPoints() {
+    return xd.list.map(function (p) { var g = xd.geo[xdKey(p)]; return g && isFinite(g.lat) ? { p: p, lat: g.lat, lng: g.lng, approx: !!g.approx } : null; }).filter(Boolean);
+  }
+  function xdPopup(x, off) {
+    var p = x.p;
+    return '<div class="xdpop"><b>' + esc(p.city || 'Crossdock') + '</b>' + (x.approx ? ' <span class="muted tiny">(city only, address not found)</span>' : '') +
+      (p.addr ? '<br>' + esc(p.addr) : '') + (p.contact ? '<br>' + esc(p.contact) : '') + (p.price ? '<br><span class="xdprice">' + esc(p.price) + '</span>' : '') +
+      (off ? '<br><span class="muted">' + esc(off) + '</span>' : '') +
+      '<br><button data-act="start">Set as Start</button><button data-act="stop">Add as Stop</button><button data-act="end">Set as End</button></div>';
+  }
+  function xdDraw() {
+    if (!state.xdLayer) return;
+    state.xdLayer.clearLayers();
+    if (!xd.on) return;
+    var near = state.lastResult ? xdNearRoute(state.lastResult, 1e9) : null, byKey = {};
+    (near || []).forEach(function (n) { byKey[xdKey(n.x.p)] = n; });
+    xdPoints().forEach(function (x) {
+      var n = byKey[xdKey(x.p)], off = n ? (n.offMi < 1 ? 'on the route' : mi(n.offMi) + ' mi off the route') + ' at mile ~' + mi(n.mile) : '';
+      var item = { label: (x.p.addr || x.p.city), lat: x.lat, lng: x.lng };
+      var m = L.marker([x.lat, x.lng], { pane: 'markerPane', title: x.p.city || '', icon: L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+        html: '<div class="xd-marker' + (n && n.offMi <= 25 ? ' near' : '') + '">X</div>' }) })
+        .bindTooltip('<b>' + esc(x.p.city || 'Crossdock') + '</b>' + (x.p.price ? '<br>' + esc(x.p.price) : '') + (off ? '<br>' + esc(off) : ''))
+        .bindPopup(xdPopup(x, off));
+      m.on('popupopen', function (ev) { bindPopupButtons(ev.popup.getElement(), item); });
+      m.addTo(state.xdLayer);
+    });
+  }
+  /** Crossdocks by distance from the route line; mile = where along the route they are closest. */
+  function xdNearRoute(res, maxMi) {
+    var pts = []; (res.route.legs || []).forEach(function (l) { (l.coordinates || []).forEach(function (c) { pts.push(c); }); });
+    if (pts.length < 2) return [];
+    var R = 3958.8, rad = Math.PI / 180, hav = function (a, b) {
+      var dl = (b[0] - a[0]) * rad, dg = (b[1] - a[1]) * rad, h = Math.sin(dl / 2) * Math.sin(dl / 2) + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dg / 2) * Math.sin(dg / 2);
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+    };
+    var cum = [0]; for (var k = 1; k < pts.length; k++) cum.push(cum[k - 1] + hav(pts[k - 1], pts[k]));
+    var scale = res.route.totals.miles && cum[cum.length - 1] ? res.route.totals.miles / cum[cum.length - 1] : 1;
+    var stepN = Math.max(1, Math.floor(pts.length / 4000));
+    return xdPoints().map(function (x) {
+      var best = Infinity, at = 0;
+      for (var i = 0; i < pts.length; i += stepN) { var d = hav([x.lat, x.lng], pts[i]); if (d < best) { best = d; at = cum[i]; } }
+      return { x: x, offMi: best, mile: at * scale };
+    }).filter(function (n) { return n.offMi <= maxMi; }).sort(function (a, b) { return a.mile - b.mile; });
+  }
+  function setXdLayer(on, fit) {
+    xd.on = !!on;
+    try { localStorage.setItem('zr.xdLayer', on ? '1' : '0'); } catch (e) { /* ignore */ }
+    var b = $('#xdLayerBtn'); if (b) { b.classList.toggle('on', xd.on); b.setAttribute('aria-pressed', xd.on ? 'true' : 'false'); }
+    if (!on) { xdDraw(); return; }
+    xdRefresh().then(function () {
+      xdDraw();
+      var pts = xdPoints();
+      if (fit && pts.length) state.map.fitBounds(L.latLngBounds(pts.map(function (x) { return [x.lat, x.lng]; })), { padding: [60, 60], maxZoom: 8 });
+      if (!xd.list.length) toast('No crossdock partners yet: add them in the Freight Board → Crossdock section');
+    });
+  }
+  function xdRefresh() {
+    return xdReadList().then(function (r) { xd.list = (r.list || []).filter(function (p) { return p && (p.city || p.addr); }); xd.from = r.from; xdDraw(); xdLocateMissing(); });
+  }
+  function initCrossdocks() {
+    if (!can('crossdocks')) return; // Basic mode: no crossdock layer, button, or lookups
+    xdLoadGeo();
+    state.xdLayer = L.layerGroup().addTo(state.map);
+    var b = $('#xdLayerBtn');
+    if (b) b.addEventListener('click', function () { setXdLayer(!xd.on, !xd.on); });
+    var on = true; try { on = localStorage.getItem('zr.xdLayer') !== '0'; } catch (e) { /* ignore */ }
+    if (on) setXdLayer(true, false);
+    // the Freight Board (another tab, or the page around this one) changed the list
+    window.addEventListener('storage', function (e) { if (e.key === XD_KEY && xd.on) xdRefresh(); });
+  }
+  /** Trip notes line: crossdock partners within 25 mi of this route, in route order. */
+  function xdTripNote(res) {
+    if (!can('crossdocks') || !xd.list.length) return null;
+    var near = xdNearRoute(res, 25);
+    if (!near.length) return 'None within 25 mi of this route';
+    return near.slice(0, 8).map(function (n) { return esc(n.x.p.city) + ' <span class="muted">(mile ~' + mi(n.mile) + (n.offMi >= 1 ? ', ' + mi(n.offMi) + ' mi off' : '') + ')</span>'; }).join(' · ') +
+      (near.length > 8 ? ' · +' + (near.length - 8) + ' more' : '');
+  }
   function toggleMenu(open) {
     var m = $('#settingsMenu'); if (!m) return;
     m.classList.toggle('hidden', !open); $('#settingsBtn').setAttribute('aria-expanded', open ? 'true' : 'false');

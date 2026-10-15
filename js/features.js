@@ -27,6 +27,7 @@
     { id: 'hos', group: 'planner', label: 'HOS planner + appointment times', visitor: false, module: 'hos' },
     { id: 'trips', group: 'planner', label: 'Saved trips (save, export, import)', visitor: false, module: 'share' },
     { id: 'tollMap', group: 'map', label: 'Toll map layer (Tolls button, rates, legend)', visitor: false },
+    { id: 'crossdocks', group: 'map', label: 'Crossdocks map layer (Freight Board partners)', visitor: false },
     { id: 'tandemUi', group: 'truck', label: 'Tandem settings, alerts and map labels', visitor: false },
     { id: 'routePrefs', group: 'truck', label: 'Routing preferences (avoid tolls, ferries, ...)', visitor: false },
     { id: 'costsAdv', group: 'truck', label: 'Advanced costs (load rate, per hour, fuel source/type, profit)', visitor: false }

@@ -727,6 +727,7 @@
     setView('map');
     $$('.view-btn').forEach(function (b) { b.addEventListener('click', function () { setView(b.dataset.view); }); });
     wirePlaceLinks(map);
+    wireRestPopups(map);
     $('#fitBtn').addEventListener('click', fitRoute);
     map.createPane('tollPane'); map.getPane('tollPane').style.zIndex = 390; // under the route line (overlayPane 400)
     var tb = $('#tollLayerBtn');
@@ -1583,7 +1584,7 @@
         '</td><td class="n">' + (it.detourSec != null ? Math.max(1, Math.round(it.detourSec / 60)) + ' min' : it.src === 'osm' ? 'near route' : '–') + '</td></tr>';
       var tip = '<b>' + esc(it.name) + '</b><br>Mile ' + mi(it.mile) + (q ? ' · avg diesel ~$' + q.price.toFixed(2) : '') + (it.parking ? '<br>' + esc(it.parking) : '');
       L.marker([it.lat, it.lng], { pane: 'markerPane', icon: L.divIcon({ className: '', html: '<div class="fuel-marker' + (rest ? ' rest' : '') + '">' + ICON(rest ? 'bed' : 'fuel') + '</div>', iconSize: [20, 20], iconAnchor: [10, 10] }) })
-        .bindTooltip(tip).bindPopup(tip + (it.address ? '<br>' + esc(it.address) : '') + (it.phone ? '<br>' + esc(it.phone) : '')).addTo(state.stopsLayer);
+        .bindTooltip(tip).bindPopup(it.src === 'osm' ? raPopup(it, it.lat, it.lng) : tip + (it.address ? '<br>' + esc(it.address) : '') + (it.phone ? '<br>' + esc(it.phone) : '') + placeLinks(it.lat, it.lng), { maxWidth: 300 }).addTo(state.stopsLayer);
     });
     box.innerHTML = h + '</tbody></table><div class="tdisc">' + items.length + ' truck stops / fuel from TomTom search within a 5-min detour (' + esc(note || '') + '); ' + osm.length +
       ' rest areas and service plazas from OpenStreetMap (bundled; truck parking where tagged). Mile = distance from the start along the route.' +
@@ -1592,6 +1593,62 @@
     $$('.chip', box).forEach(function (b) { b.addEventListener('click', function () { try { localStorage.setItem('zr.stopsFilter', b.dataset.f); } catch (e) { /* ignore */ } renderStops(items, note); }); });
   }
   function stateAtMile(res, m) { var r = (res.states || []).find(function (x) { return m >= x.startMile - 0.5 && m <= x.endMile + 0.5; }); return r ? r.code : null; }
+  // ---------- rest-area details (2026-10-22): click a rest area for its address, reviews and photos ----------
+  // The address is looked up on click from OpenStreetMap (Nominatim reverse: free, at most 1 request a second) and
+  // remembered in this browser. Reviews and photos open on Google Maps (showing them here would need a paid Google key).
+  var RA_ADDR_KEY = 'zr.raAddr.v1', raAddr = null, raLast = 0;
+  function raCache() { if (!raAddr) { try { raAddr = JSON.parse(localStorage.getItem(RA_ADDR_KEY) || '{}') || {}; } catch (e) { raAddr = {}; } } return raAddr; }
+  function raCacheSave() {
+    try { var k = Object.keys(raAddr); if (k.length > 600) k.slice(0, k.length - 600).forEach(function (x) { delete raAddr[x]; }); localStorage.setItem(RA_ADDR_KEY, JSON.stringify(raAddr)); } catch (e) { /* ignore */ }
+  }
+  function raLookup(lat, lng) {
+    var key = (+lat).toFixed(5) + ',' + (+lng).toFixed(5), c = raCache();
+    if (c[key]) return Promise.resolve(c[key]);
+    var wait = Math.max(0, raLast + 1100 - Date.now()); raLast = Date.now() + wait;
+    return new Promise(function (r) { setTimeout(r, wait); }).then(function () {
+      return fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&addressdetails=1&accept-language=en&lat=' + (+lat).toFixed(6) + '&lon=' + (+lng).toFixed(6));
+    }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(function (j) {
+      var a = (j && j.address) || {};
+      var out = { road: [a.house_number, a.road].filter(Boolean).join(' '), town: a.city || a.town || a.village || a.hamlet || a.municipality || '',
+        county: a.county || '', st: String(a['ISO3166-2-lvl4'] || '').replace(/^US-/, ''), zip: a.postcode || '' };
+      c[key] = out; raCacheSave(); return out;
+    });
+  }
+  function raAddrText(a) {
+    var place = [a.town || a.county, [a.st, a.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    return [a.road, place].filter(Boolean).join(', ');
+  }
+  function raGeneric(nm) { return !nm || /^(rest area|service plaza)$/i.test(nm); }
+  function raReviewUrl(it, a) {
+    var q = raGeneric(it.name) ? [(it.kind === 'service plaza' ? 'Service plaza' : 'Rest area') + (a && a.road ? ' ' + a.road : ''), a && (a.town || a.county), (a && a.st) || it.st]
+      : [it.name, a && a.road, a && (a.town || a.county), (a && a.st) || it.st];
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q.filter(Boolean).join(', '));
+  }
+  /** Popup for a rest area / service plaza / OSM truck stop: it = {name, kind, parking, toilets, st, mile} */
+  function raPopup(it, lat, lng) {
+    var ll = (+lat).toFixed(6) + ',' + (+lng).toFixed(6);
+    var extra = [it.parking, it.toilets ? 'toilets' : ''].filter(Boolean);
+    return '<div class="rapop" data-ra="' + esc(JSON.stringify({ name: it.name, kind: it.kind, st: it.st || '' })) + '"><b>' + esc(it.name) + '</b> <span class="muted">' + esc(it.kind) + '</span>' +
+      (it.mile != null ? '<div>Mile ' + mi(it.mile) + ' on this trip</div>' : '') +
+      '<div class="ra-addr" data-ll="' + ll + '"><span class="muted">Looking up address…</span></div>' +
+      (extra.length ? '<div class="ra-x">' + extra.map(function (x) { return '<span' + (/no truck/.test(x) ? ' class="nopark"' : '') + '>' + esc(x) + '</span>'; }).join(' · ') + '</div>' : '') +
+      '<div class="plinks"><a class="ra-rev" href="' + raReviewUrl(it, null) + '" target="_blank" rel="noopener">★ Reviews &amp; photos</a>' +
+      '<a href="https://www.google.com/maps/dir/?api=1&amp;destination=' + ll + '" target="_blank" rel="noopener">Directions</a></div>' + placeLinks(lat, lng) + '</div>';
+  }
+  function wireRestPopups(map) {
+    map.on('popupopen', function (e) {
+      var el = e.popup.getElement(), box = el && el.querySelector('.ra-addr'); if (!box || box.dataset.done) return;
+      box.dataset.done = '1';
+      var p = box.dataset.ll.split(','), info = {}; try { info = JSON.parse(el.querySelector('.rapop').dataset.ra); } catch (x) { /* ignore */ }
+      raLookup(+p[0], +p[1]).then(function (a) {
+        var t = raAddrText(a);
+        box.innerHTML = t ? esc(t) + ' <a href="#" class="ra-copy" title="Copy address">Copy</a>' : '<span class="muted">No street address on record</span>';
+        var rv = el.querySelector('.ra-rev'); if (rv) rv.href = raReviewUrl(info, a);
+        var cp = box.querySelector('.ra-copy');
+        if (cp) cp.addEventListener('click', function (ev) { ev.preventDefault(); try { navigator.clipboard.writeText(t).then(function () { toast('Address copied'); }); } catch (x) { /* ignore */ } });
+      }, function () { box.innerHTML = '<span class="muted">Address lookup is not available right now (' + esc(box.dataset.ll) + ')</span>'; });
+    });
+  }
   // rest areas map layer (toggle next to Tolls); markers only at zoom >= 7, redrawn on move
   function drawRestLayer() {
     if (!state.restLayer) return;
@@ -1603,7 +1660,9 @@
       if (n > 800 || !b.contains([row[0], row[1]])) return; n++;
       var o = restItem(row), p = restParking(o), nm = o.name || (o.kind === 'services' ? 'Service plaza' : 'Rest area');
       L.marker([row[0], row[1]], { pane: 'markerPane', icon: L.divIcon({ className: '', html: '<div class="ra-marker' + (o.kind === 'services' ? ' sv' : '') + (/no truck/.test(p) ? ' np' : '') + '">' + ICON('bed') + '</div>', iconSize: [16, 16], iconAnchor: [8, 8] }) })
-        .bindTooltip('<b>' + esc(nm) + '</b>' + (p ? '<br>' + esc(p) : '') + (o.toilets ? '<br>toilets' : '')).addTo(state.restLayer);
+        .bindTooltip('<b>' + esc(nm) + '</b>' + (p ? '<br>' + esc(p) : '') + (o.toilets ? '<br>toilets' : '') + '<br><span class="muted">Click for address &amp; reviews</span>')
+        .bindPopup(raPopup({ name: nm, kind: o.kind === 'services' ? (TRUCK_STOP_RE.test(o.name || '') ? 'truck stop' : 'service plaza') : 'rest area', parking: p, toilets: o.toilets, st: o.st }, row[0], row[1]), { maxWidth: 300 })
+        .addTo(state.restLayer);
     });
   }
   function setRestLayer(on) {

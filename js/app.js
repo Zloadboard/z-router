@@ -13,32 +13,16 @@
   var ROUTE_COLOR = '#184a7e';
   var NON_SEMI = { straight: 1, bobtail: 1, light: 1 };
 
-  var state = { config: null, view: 'map', baseLayer: null, labelLayer: null, routeLayer: null, markerLayer: null, warnLayer: null,
+  var state = { via: [], config: null, view: 'map', baseLayer: null, labelLayer: null, routeLayer: null, markerLayer: null, warnLayer: null,
     searchMarker: null, lastResult: null, rules: null, rulesInfo: null, filledRows: [], tileFailed: {}, lastNote: '' };
-
-  /** Feature hooks filled in by the modules in js/feat/ (see "feature modules" below). */
-  var F = {};
-  /** Is this feature on for the current visitor? (js/gate.js decides: desktop = everything, Pages = owner choices, Basic by default.) */
-  function can(id) { return !window.ZRGate || window.ZRGate.can(id); }
-  var MODS = {}, booted = false;
-  function modCtx() {
-    return { F: F, can: can, state: state, $: $, $$: $$, esc: esc, mi: mi, money: money, short: short, tzName: tzName, C: C, TRIPS: TRIPS, SHARE_URL: SHARE_URL,
-      PROFILE_FIELDS: PROFILE_FIELDS, TRUCK_FIELDS: TRUCK_FIELDS, field: field, saveSettings: saveSettings, recalcEconomics: recalcEconomics, toast: toast,
-      readTruck: readTruck, readPrefs: readPrefs, readStopList: readStopList, hosPrefs: hosPrefs, apptStore: apptStore, apptKey: apptKey, fmtAt: fmtAt, msIso: msIso,
-      toggleMenu: toggleMenu, api: api, bindPopupButtons: bindPopupButtons, localISO: localISO, applyTrip: applyTrip, copyText: copyText, renderTandemSection: renderTandemSection };
-  }
-  /** Feature modules (js/feat/*.js) push [name, factory] onto window.ZRXQ; the factory gets the context above and returns {init}. */
-  function defineMod(name, factory) {
-    if (MODS[name]) return;
-    MODS[name] = factory(modCtx()) || {};
-    if (booted && MODS[name].init) MODS[name].init();
-  }
 
   // ---------- helpers ----------
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function debounce(fn, ms) { var t; return function () { var a = arguments, self = this; clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms); }; }
   function localISO(d) { d = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return d.toISOString().slice(0, 10); }
-  var TRIPS = window.ZRTrips, SHARE_URL = 'https://zloadboard.github.io/z-router/';
+  var EIA = window.ZREia, HOS = window.ZRHos, TRIPS = window.ZRTrips, SHARE_URL = location.origin + '/z-router/';
+  // Public copy (zloadboard.github.io/z-router): config.js sets ZR_PUBLIC. No crossdocks, no usage counter there.
+  var PUBLIC = !!window.ZR_PUBLIC;
   function mi(v, d) { return (+v || 0).toLocaleString('en-US', { maximumFractionDigits: d == null ? 0 : d }); }
   function fmtMiles(m) { return mi(m, 1) + ' mi'; }
   function mi1(v) { return (+v || 0).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
@@ -211,7 +195,7 @@
     box.innerHTML = '';
     WP_DEFS.forEach(function (d, idx) {
       var row = document.createElement('div');
-      row.className = 'wp-row ' + d.role + (d.role === 'stop' ? ' shown' : ''); // v0.9.2: all 7 boxes always show
+      row.className = 'wp-row ' + d.role + (idx === 1 ? ' shown' : ''); // v0.9.7: Start, Stop 1, End show; "+ Add stop" shows more
       row.dataset.role = d.role; row.dataset.idx = idx;
       var ph = d.role === 'start' ? 'Start: address, city, ZIP or lat,lng' : d.role === 'end' ? 'Destination: address, city or ZIP' : d.label + ': address, city or ZIP';
       // The grip and the remove (x) button are out of the Tab order (tabindex="-1") so Tab goes stop input -> next stop input -> Run Trip.
@@ -224,7 +208,7 @@
       box.appendChild(row);
       var input = $('input', row);
       attachSuggest(input, $('ul', row), function (item) { setWaypoint(idx, item); }, { stopRow: row });
-      input.addEventListener('input', function () { delete input.dataset.lat; delete input.dataset.lng; input.classList.remove('resolved'); });
+      input.addEventListener('input', function () { delete input.dataset.lat; delete input.dataset.lng; input.classList.remove('resolved'); state.via = []; });
       input.addEventListener('keydown', function (e) {
         if (!e.altKey) return;
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
@@ -240,6 +224,13 @@
     });
     var ind = document.createElement('div'); ind.className = 'drop-ind hidden'; ind.id = 'dropIndicator';
     box.appendChild(ind);
+    if (!$('#addStopBtn')) {
+      var add = document.createElement('button');
+      add.type = 'button'; add.id = 'addStopBtn'; add.className = 'add-stop';
+      add.innerHTML = '+ Add stop'; add.title = 'Add another stop (up to 5)';
+      add.addEventListener('click', function () { addStopRow(true); });
+      box.parentNode.insertBefore(add, box.nextSibling);
+    }
     updateAddStop();
   }
   function removeRow(row) {
@@ -276,11 +267,13 @@
   }
   /** Write a stop list back into the fixed slots: first = Start, last = End, the rest fill Stop 1..n (geocoded points are kept, no re-geocoding). */
   function writeStopList(list) {
+    state.via = []; // v0.9.6: dragged route points belong to the old stop list
     var s = S.toSlots(list), last = WP_DEFS.length - 1;
     putValue(wpRow(0), s.start);
     for (var k = 1; k < last; k++) {
       var row = wpRow(k), has = k - 1 < s.stops.length;
       putValue(row, has ? s.stops[k - 1] : null);
+      row.classList.toggle('shown', has || k === 1); // v0.9.7: empty extra stop boxes fold away again
     }
     putValue(wpRow(last), s.end);
     updateAddStop();
@@ -293,15 +286,22 @@
       b.textContent = LETTERS[i] || ''; b.classList.toggle('end', last);
       $('.wl', r).textContent = i === 0 ? 'Start' : last ? 'End' : 'Stop ' + i;
     });
+    var btn = $('#addStopBtn');
+    if (btn) btn.classList.toggle('hidden', !$$('#waypoints .wp-row.stop:not(.shown)').length);
   }
-  /** v0.9.2: no Add stop button (all 7 boxes show); focuses the first empty middle box. */
-  function addStopRow(focus) { // kept for older callers: focuses the first empty middle box
-    var free = $$('#waypoints .wp-row.stop').filter(function (r) { return !$('input', r).value.trim(); })[0];
+  /** v0.9.7: "+ Add stop" shows the next stop box (above End). Uses an empty shown box first. */
+  function addStopRow(focus) {
+    var free = $$('#waypoints .wp-row.stop.shown').filter(function (r) { return !$('input', r).value.trim(); })[0];
+    if (!free) {
+      free = $$('#waypoints .wp-row.stop:not(.shown)')[0] || null;
+      if (free) { free.classList.add('shown'); updateAddStop(); }
+    }
     if (free && focus) $('input', free).focus();
     return free || null;
   }
   function setWaypoint(idx, item) {
     var row = wpRow(idx); if (!row) return;
+    state.via = [];
     if (row.dataset.role === 'stop' && item) row.classList.add('shown');
     putValue(row, item);
     updateAddStop();
@@ -321,7 +321,7 @@
       pts.push(ll);
       L.marker(ll, { title: name, icon: L.divIcon({ className: 'pmk-wrap', iconSize: [24, 24], iconAnchor: [12, 12],
         html: '<div class="pmk" data-name="' + name + '"><div class="mk mk-' + role + '">' + (LETTERS[i] || '') + '</div><b>' + esc(name) + '</b></div>' }) })
-        .bindPopup('<b>' + esc(name) + '</b> ' + esc(inp.value)).addTo(state.planLayer);
+        .bindPopup('<b>' + esc(name) + '</b> ' + esc(inp.value) + placeLinks(ll[0], ll[1])).addTo(state.planLayer);
     });
     if (!focusRow || !pts.length) return;
     if (pts.length === 1) state.map.flyTo(pts[0], 10, { duration: 0.8 });
@@ -396,13 +396,29 @@
     opts = opts || {};
     var items = [], active = -1, seq = 0, pending = false, autopick = false;
     function close() { list.classList.add('hidden'); list.innerHTML = ''; items = []; active = -1; }
-    function pick(it) { onPick(it); close(); }
+    function pick(it) {
+      if (it.action === 'company') { companyLookup(it.q); return; }
+      onPick(it); close();
+    }
+    // v0.9.6: "Search companies for ..." row -> business names from OpenStreetMap, shown in the same list
+    function companyLookup(q) {
+      var my = ++seq;
+      items = [{ muted: true, label: 'Searching companies for \u201c' + q + '\u201d\u2026' }]; active = -1; render();
+      api('/api/company?q=' + encodeURIComponent(q)).then(function (j) {
+        if (my !== seq) return;
+        if (!j.ok) items = [{ muted: true, label: j.error || 'Company search failed' }];
+        else if (!j.items.length) { items = [{ muted: true, label: 'No company called \u201c' + q + '\u201d found. Try the street address from the rate con.' }]; usage('search-miss', { q: q, kind: 'company' }); }
+        else { items = j.items; active = 0; }
+        if (document.activeElement === input) render(); else close();
+      }).catch(function () { items = [{ muted: true, label: 'Company search failed' }]; render(); });
+    }
     function render() {
       list.innerHTML = '';
       items.forEach(function (it, i) {
         var li = document.createElement('li');
         if (it.muted) { li.className = 'muted'; li.textContent = it.label; }
-        else li.innerHTML = esc(it.title) + (it.label && it.label !== it.title ? '<small>' + esc(it.label) + '</small>' : '');
+        else if (it.action) { li.className = 'action'; li.innerHTML = ICON('search') + ' ' + esc(it.title) + '<small>' + esc(it.label) + '</small>'; }
+        else li.innerHTML = esc(it.title) + (it.label && it.label !== it.title ? '<small>' + esc(it.label) + (it.source ? ' \u00b7 ' + esc(it.source) : '') + '</small>' : '');
         if (i === active) li.classList.add('active');
         li.addEventListener('mousedown', function (e) { e.preventDefault(); if (!it.muted) pick(it); });
         list.appendChild(li);
@@ -424,6 +440,7 @@
         if (j.code === 'API_KEY_MISSING') items = [{ muted: true, label: NO_KEY_SUGGEST }];
         else if (!j.ok) items = [{ muted: true, label: 'Suggestions unavailable: ' + (j.error || 'error') }];
         else items = j.items.length ? j.items : [{ muted: true, label: 'No matches' }];
+        if (j.ok && !j.items.some(function (x) { return !x.action; })) usage('search-miss', { q: q, kind: 'address' });
         active = -1;
         if (autopick) { // Tab was pressed while suggestions were loading: take the first one if the box is unchanged
           autopick = false;
@@ -705,19 +722,22 @@
     state.warnLayer = L.layerGroup().addTo(map);
     state.stopsLayer = L.layerGroup().addTo(map);
     state.restLayer = L.layerGroup().addTo(map);
-    map.on('moveend', function () { if (state.restOn && F.drawRestLayer) F.drawRestLayer(); });
+    map.on('moveend', function () { if (state.restOn) drawRestLayer(); });
     state.actionLayer = L.layerGroup().addTo(map);
     setView('map');
     $$('.view-btn').forEach(function (b) { b.addEventListener('click', function () { setView(b.dataset.view); }); });
+    wirePlaceLinks(map);
     $('#fitBtn').addEventListener('click', fitRoute);
     map.createPane('tollPane'); map.getPane('tollPane').style.zIndex = 390; // under the route line (overlayPane 400)
     var tb = $('#tollLayerBtn');
-    if (tb && can('tollMap')) {
+    if (tb) {
       var on = true; try { on = localStorage.getItem('zr.tollLayer') !== 'off'; } catch (e) { /* private mode */ }
       tb.addEventListener('click', function () { setTollLayer(!state.tollOn); });
       setTollLayer(on);
     }
     map.on('zoomend', function () { if (state.lastResult) drawActionMarkers(); });
+    var rb = $('#restLayerBtn');
+    if (rb) { rb.addEventListener('click', function () { setRestLayer(!state.restOn); }); var ron = false; try { ron = localStorage.getItem('zr.restLayer') === '1'; } catch (e) { /* ignore */ } if (ron) setRestLayer(true); }
   }
   // ---------- Toll roads layer (bundled OSM geometry, coloured by 5-axle $/mile tier) ----------
   var TOLL_STYLE = {
@@ -762,18 +782,7 @@
     state.tollLegend = new C2();
     return state.tollLegend;
   }
-  function setTollLayer(on) {
-    state.tollOn = !!on;
-    var b = $('#tollLayerBtn'); if (b) { b.classList.toggle('on', state.tollOn); b.setAttribute('aria-pressed', state.tollOn ? 'true' : 'false'); }
-    try { localStorage.setItem('zr.tollLayer', state.tollOn ? 'on' : 'off'); } catch (e) { /* ignore */ }
-    if (!state.tollOn) { if (state.tollLayer) state.map.removeLayer(state.tollLayer); if (state.tollLegend) state.map.removeControl(state.tollLegend); return; }
-    loadTollLayer().then(function (layer) {
-      state.tollLayer = layer;
-      if (!state.tollOn) return;
-      layer.addTo(state.map); tollLegendControl().addTo(state.map);
-    }, function () { setTollLayer(false); });
-  }
-  // ---------- Live traffic layer (TomTom Traffic API raster tiles: flow + incidents; tiles only, no other Traffic calls) ----------
+  // ---------- Live traffic layer (TomTom Traffic API raster tiles: flow + incidents). Ported from Z Router v0.11 ----------
   var TRAFFIC_LEGEND = [['#1a9a3a', 'Free flowing'], ['#f2c200', 'Slower than usual'], ['#e8590c', 'Slow'], ['#b00020', 'Heavy / stopped']];
   function trafficTileUrl(view) { return (window.ZR_TILE_URL && window.ZR_TILE_URL(view)) || '/api/tiles/' + view + '/{z}/{x}/{y}'; }
   function trafficUnavailable(why, quiet) {
@@ -800,7 +809,7 @@
       var d = L.DomUtil.create('div', 'tlegend trlegend');
       d.innerHTML = '<div class="tl-h">Live traffic</div>' + TRAFFIC_LEGEND.map(function (x) {
         return '<div class="tl-r"><i style="background:' + x[0] + '"></i>' + esc(x[1]) + '</div>';
-      }).join('') + '<div class="tl-n">Icons show incidents and closures. Traffic © TomTom</div>';
+      }).join('') + '<div class="tl-n">Icons show incidents and closures. Zoom in to state level or closer. Traffic &copy; TomTom</div>';
       L.DomEvent.disableClickPropagation(d);
       return d;
     } });
@@ -813,15 +822,27 @@
     if (!quiet) { try { localStorage.setItem('zr.trafficLayer', state.trafficOn ? 'on' : 'off'); } catch (e) { /* ignore */ } }
     if (!state.trafficOn) { if (state.trafficLayers) state.trafficLayers.forEach(function (l) { state.map.removeLayer(l); }); if (state.trafficLegend) state.map.removeControl(state.trafficLegend); return; }
     trafficTiles().forEach(function (l) { l.addTo(state.map); }); trafficLegendControl().addTo(state.map);
+    if (state.map.getZoom() < 5) toast('Live traffic shows from state level in: zoom in to see it.');
   }
   function initTraffic() {
-    var b = $('#trafficLayerBtn'); if (!b || !can('traffic')) return;
+    var b = $('#trafficLayerBtn'); if (!b) return;
     state.map.createPane('trafficPane'); state.map.getPane('trafficPane').style.zIndex = 380; state.map.getPane('trafficPane').style.pointerEvents = 'none'; // above the base map, under toll roads and the route
     var cfg = state.config || {};
     if (!cfg.traffic) { trafficUnavailable(cfg.configured === false ? 'needs a routing key' : 'the Traffic API is not enabled on this key', true); return; }
     b.addEventListener('click', function () { setTrafficLayer(!state.trafficOn); });
     var on = false; try { on = localStorage.getItem('zr.trafficLayer') === 'on'; } catch (e) { /* private mode */ }
     if (on) setTrafficLayer(true, true);
+  }
+  function setTollLayer(on) {
+    state.tollOn = !!on;
+    var b = $('#tollLayerBtn'); if (b) { b.classList.toggle('on', state.tollOn); b.setAttribute('aria-pressed', state.tollOn ? 'true' : 'false'); }
+    try { localStorage.setItem('zr.tollLayer', state.tollOn ? 'on' : 'off'); } catch (e) { /* ignore */ }
+    if (!state.tollOn) { if (state.tollLayer) state.map.removeLayer(state.tollLayer); if (state.tollLegend) state.map.removeControl(state.tollLegend); return; }
+    loadTollLayer().then(function (layer) {
+      state.tollLayer = layer;
+      if (!state.tollOn) return;
+      layer.addTo(state.map); tollLegendControl().addTo(state.map);
+    }, function () { setTollLayer(false); });
   }
   function providerTiles(view) {
     var cfg = state.config || {};
@@ -873,7 +894,9 @@
   function clearRoute() {
     state.routeLayer.clearLayers(); state.markerLayer.clearLayers(); state.warnLayer.clearLayers(); state.actionLayer.clearLayers(); state.stopsLayer.clearLayers(); state.stopsShown = null;
     state.lastResult = null;
-    if (F.xdDraw && state.xdLayer) F.xdDraw();
+    if (state.viaLayer) state.viaLayer.clearLayers();
+    if (state.viaCtl) state.viaCtl.getContainer().classList.add('hidden');
+    if (typeof xdDraw === 'function' && state.xdLayer) xdDraw();
   }
   /** Point at `mile` along the route polyline (scaled to the provider's total miles). */
   function pointAtMile(res, mile) {
@@ -895,7 +918,7 @@
   function drawActionMarkers() {
     state.actionLayer.clearLayers();
     var res = state.lastResult, cur = currentTandem();
-    if (!res || !can('tandemUi') || cur.mode !== 'route' || !cur.ev || !cur.ev.loaded || NON_SEMI[cur.n.type]) return;
+    if (!res || cur.mode !== 'route' || !cur.ev || !cur.ev.loaded || NON_SEMI[cur.n.type]) return;
     var placed = []; // label boxes in screen px: stack labels that would overlap (state lines close together)
     cur.ev.actions.forEach(function (a) {
       if (cur.n.kpra != null && a.centerLimitFt >= cur.n.kpra - 1e-9) return;
@@ -944,6 +967,114 @@
     });
   }
 
+  // ---------- v0.9.6: drag the route line to reroute (pass-through points), Street View links, usage log ----------
+  /** Circle radius (m) for a dragged point: about 15 screen pixels at the current zoom (300 m .. 20 km). */
+  function viaRadius() {
+    var z = state.map.getZoom(), c = state.map.getCenter();
+    var mpp = 40075016.686 * Math.cos(c.lat * Math.PI / 180) / Math.pow(2, z + 8);
+    return Math.max(300, Math.min(20000, Math.round(mpp * 15)));
+  }
+  /** Where along a leg (0..1) the point nearest to ll is. */
+  function legPos(coords, ll) {
+    var best = 0, bd = Infinity, k = Math.cos(ll.lat * Math.PI / 180);
+    for (var i = 0; i < coords.length; i++) {
+      var dy = coords[i][0] - ll.lat, dx = (coords[i][1] - ll.lng) * k, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return coords.length > 1 ? best / (coords.length - 1) : 0;
+  }
+  function routeLineDrag(line, legIdx, coords) {
+    line.on('mousedown', function (e) {
+      if (e.originalEvent && e.originalEvent.button !== 0) return;
+      L.DomEvent.stop(e);
+      var map = state.map, start = map.latLngToContainerPoint(e.latlng), moved = false, done = false;
+      map.dragging.disable();
+      document.body.classList.add('zr-dragging-route');
+      var ghost = L.circleMarker(e.latlng, { radius: 7, color: ROUTE_COLOR, weight: 3, fillColor: '#fff', fillOpacity: 1, interactive: false }).addTo(map);
+      function move(ev) { ghost.setLatLng(ev.latlng); if (!moved && map.latLngToContainerPoint(ev.latlng).distanceTo(start) > 6) moved = true; }
+      function up() {
+        if (done) return; done = true;
+        map.off('mousemove', move); map.off('mouseup', up); document.removeEventListener('mouseup', up, true);
+        map.dragging.enable(); document.body.classList.remove('zr-dragging-route');
+        var ll = ghost.getLatLng(); map.removeLayer(ghost);
+        if (!moved) return;
+        addVia({ lat: ll.lat, lng: ll.lng, leg: legIdx, pos: legPos(coords, e.latlng), r: viaRadius() }, coords);
+      }
+      map.on('mousemove', move); map.on('mouseup', up); document.addEventListener('mouseup', up, true);
+    });
+  }
+  function addVia(v, legCoords) {
+    var res = state.lastResult;
+    if (res && res.reordered) { // keep the leg numbers: freeze the re-ordered stop order first
+      writeStopList(res.waypoints.map(function (w) { return { label: w.label, lat: w.lat, lng: w.lng }; }));
+      if (field('reorderStops')) field('reorderStops').checked = false;
+    }
+    state.via = (state.via || []).filter(function (x) { return x && isFinite(x.lat); });
+    state.via.forEach(function (x) { if (x.leg === v.leg && legCoords) x.pos = legPos(legCoords, L.latLng(x.lat, x.lng)); });
+    state.via.push(v);
+    usage('drag', { leg: v.leg, via: state.via.length });
+    runTrip();
+  }
+  function drawVia() {
+    if (!state.map) return;
+    if (!state.viaLayer) state.viaLayer = L.layerGroup().addTo(state.map);
+    state.viaLayer.clearLayers();
+    var vs = state.via || [];
+    vs.forEach(function (v, k) {
+      L.marker([v.lat, v.lng], { draggable: true, title: 'Dragged route point: drag to move, click to remove', keyboard: false,
+        icon: L.divIcon({ className: '', html: '<div class="via-pt"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) })
+        .on('dragend', function (ev) { var ll = ev.target.getLatLng(); v.lat = ll.lat; v.lng = ll.lng; v.r = viaRadius(); runTrip(); })
+        .on('click', function () { vs.splice(k, 1); runTrip(); })
+        .addTo(state.viaLayer);
+    });
+    if (!state.viaCtl) {
+      var Ctl = L.Control.extend({ options: { position: 'topright' }, onAdd: function () {
+        var b = L.DomUtil.create('button', 'via-reset hidden'); b.type = 'button';
+        b.title = 'Remove the dragged points and go back to the original route';
+        L.DomEvent.disableClickPropagation(b);
+        b.addEventListener('click', function () { state.via = []; runTrip(); });
+        return b; } });
+      state.viaCtl = new Ctl().addTo(state.map);
+    }
+    var btn = state.viaCtl.getContainer();
+    btn.textContent = '\u21ba Original route' + (vs.length > 1 ? ' (' + vs.length + ' points)' : '');
+    btn.classList.toggle('hidden', !vs.length || !state.lastResult);
+  }
+  /** Street View / Google Maps / satellite links for a place (popups). */
+  function placeLinks(lat, lng) {
+    var ll = (+lat).toFixed(6) + ',' + (+lng).toFixed(6);
+    return '<div class="plinks"><a href="https://www.google.com/maps/@?api=1&amp;map_action=pano&amp;viewpoint=' + ll + '" target="_blank" rel="noopener">Street View</a>' +
+      '<a href="#" data-sat="' + ll + '">Satellite</a>' +
+      '<a href="https://www.google.com/maps/search/?api=1&amp;query=' + ll + '" target="_blank" rel="noopener">Google Maps</a></div>';
+  }
+  function wirePlaceLinks(map) {
+    map.on('popupopen', function (e) {
+      var el = e.popup.getElement(); if (!el) return;
+      $$('[data-sat]', el).forEach(function (a) {
+        a.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          var p = a.dataset.sat.split(',');
+          setView('satellite'); map.setView([+p[0], +p[1]], 18);
+          usage('satellite', {});
+        });
+      });
+      $$('a[href*="map_action=pano"]', el).forEach(function (a) { a.addEventListener('click', function () { usage('streetview', {}); }); });
+    });
+    // right-click anywhere on the map: Street View / Satellite / Google Maps for that spot
+    map.on('contextmenu', function (e) {
+      L.popup({ className: 'ctx-pop' }).setLatLng(e.latlng).setContent('<b>' + e.latlng.lat.toFixed(5) + ', ' + e.latlng.lng.toFixed(5) + '</b>' + placeLinks(e.latlng.lat, e.latlng.lng)).openOn(map);
+    });
+  }
+  /** Usage counter (who plans routes, failed searches). Sent to the site's /router-usage; fails silently. */
+  function usage(ev, data) {
+    try {
+      if (PUBLIC) return;
+      if (!/^https?:$/.test(location.protocol)) return;
+      fetch('/router-usage', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ev: ev, data: data || {}, page: location.pathname.indexOf('mobile') >= 0 ? 'mobile' : 'desktop' }) }).catch(function () {});
+    } catch (e) { /* never break the router */ }
+  }
+
   // ---------- run trip ----------
   function runTrip(e) {
     if (e) e.preventDefault();
@@ -962,16 +1093,20 @@
     state.filledRows = filled.map(function (w) { return w.idx; });
     var runInputs = { truck: readTruck(), prefs: readPrefs(), summary: truckSummary(), vehicle: vehicleText(), prefText: prefSummary() };
     api('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ truck: readTruck(), prefs: readPrefs(), waypoints: filled.map(function (w) { var c = Object.assign({}, w); delete c.idx; return c; }) }) })
+      body: JSON.stringify({ truck: readTruck(), prefs: readPrefs(), via: state.via || [], waypoints: filled.map(function (w) { var c = Object.assign({}, w); delete c.idx; return c; }) }) })
       .then(function (j) {
         if (!j.ok) {
           if (j.code === 'API_KEY_MISSING') showMessage('<b>Routing API key not configured.</b> ' + esc(j.error), 'error');
           else {
             var extra = (j.details || []).map(function (n) { return '<li>' + esc(n.title || n.code) + '</li>'; }).join('');
             showMessage(esc(j.error || 'Routing failed.') + (extra ? '<ul>' + extra + '</ul>' : ''), 'error');
+            if ((state.via || []).length && state.lastResult) { drawVia(); showBanner('Could not route through the dragged point: ' + esc(j.error || 'no truck route') + ' Move the white dot, or click it to remove it.'); }
+            usage('route-fail', { error: String(j.error || '').slice(0, 160), via: (state.via || []).length });
           }
           return;
         }
+        usage('route', { stops: (j.waypoints || []).length, miles: Math.round(j.route.totals.miles), via: (state.via || []).length,
+          from: (j.waypoints[0] || {}).label, to: (j.waypoints[j.waypoints.length - 1] || {}).label });
         var after = j.tandem && j.tandem.loaded && !state.rules ? loadRules() : Promise.resolve();
         return after.then(function () { state.runInputs = runInputs; renderResult(j); });
       })
@@ -985,21 +1120,27 @@
     clearRoute();
     state.lastResult = res;
     if (state.planLayer) state.planLayer.clearLayers();
-    if (F.applyEiaFuel) F.applyEiaFuel(res);
+    applyEiaFuel(res);
     $('#tandemPreview').value = '';
     var r = res.route;
     r.legs.forEach(function (leg, i) {
       if (!leg.coordinates.length) return;
       L.polyline(leg.coordinates, { color: '#ffffff', weight: 6.5, opacity: 0.9 }).addTo(state.routeLayer);
-      L.polyline(leg.coordinates, { color: ROUTE_COLOR, weight: 3.5, opacity: 0.95 })
-        .bindTooltip(esc(leg.from) + ' → ' + esc(leg.to) + '<br>' + fmtMiles(leg.miles) + ', ' + C.formatDuration(leg.durationSec), { sticky: true })
+      // v0.9.6: a wide invisible line on top makes the route easy to grab and drag (like Google Maps)
+      L.polyline(leg.coordinates, { color: ROUTE_COLOR, weight: 3.5, opacity: 0.95, interactive: false }).addTo(state.routeLayer);
+      var grab = L.polyline(leg.coordinates, { color: '#000', weight: 16, opacity: 0, className: 'zr-route-grab' })
+        .bindTooltip(esc(leg.from) + ' → ' + esc(leg.to) + '<br>' + fmtMiles(leg.miles) + ', ' + C.formatDuration(leg.durationSec) + '<br><i>Drag the line to change the route</i>', { sticky: true })
         .addTo(state.routeLayer);
+      routeLineDrag(grab, i, leg.coordinates);
     });
     res.waypoints.forEach(function (w, i) {
       var role = i === 0 ? 'start' : (i === res.waypoints.length - 1 ? 'end' : 'stop');
       var text = String.fromCharCode(65 + i);
-      L.marker([w.lat, w.lng], { icon: markerIcon(role, text) }).bindPopup('<b>' + text + '</b> ' + esc(w.label)).addTo(state.markerLayer);
+      L.marker([w.lat, w.lng], { icon: markerIcon(role, text) }).bindPopup('<b>' + text + '</b> ' + esc(w.label) + placeLinks(w.lat, w.lng)).addTo(state.markerLayer);
     });
+    drawVia();
+    var chk = (res.warnings || []).filter(function (w) { return /^Check this route/.test(w); })[0];
+    if (chk) showBanner(esc(chk));
     r.notices.forEach(function (n) {
       if (!n.location) return;
       L.marker(n.location, { icon: L.divIcon({ className: '', html: '<div class="warn-marker">!</div>', iconSize: [14, 14], iconAnchor: [7, 7] }) })
@@ -1009,7 +1150,7 @@
     renderDetails(res);
     onTandemInput();
     showView('results'); // the results view replaces the planning view
-    if (F.xdDraw) F.xdDraw(); // crossdock markers: distance from this route (Crossdocks module only)
+    xdDraw(); // crossdock markers: distance from this route
     fitRoute();
   }
 
@@ -1085,7 +1226,6 @@
     if (!state.lastResult) { toast('Run a trip first'); return; }
     if (id === 'print') id = 'full';
     if (!REPORTS[id]) id = 'legs';
-    if (!can(id)) { id = Object.keys(REPORTS).filter(can)[0]; if (!id) return; }
     state.report = id;
     $('#drawerIcon').innerHTML = ICON(REPORTS[id][0]);
     $('#drawerTitle').textContent = REPORTS[id][1];
@@ -1094,16 +1234,16 @@
     dr.classList.remove('hidden');
     $('#resDetails').scrollTop = 0;
     $$('#reportGrid .rb').forEach(function (b) { b.classList.toggle('on', b.dataset.report === id); b.setAttribute('aria-pressed', b.dataset.report === id ? 'true' : 'false'); });
-    if ((id === 'stops' || id === 'full') && F.loadStopsAlong) F.loadStopsAlong();
-    if ((id === 'ifta' || id === 'full') && F.loadIfta) F.loadIfta();
-    if ((id === 'send' || id === 'full') && F.renderSend) F.renderSend();
+    if (id === 'stops' || id === 'full') loadStopsAlong();
+    if (id === 'ifta' || id === 'full') loadIfta();
+    if (id === 'send' || id === 'full') renderSend();
     if (was) fitRoute();
   }
   /** Show the chosen report; "full" shows every report one after another (that is also what Print prints). */
   function showReport() {
     var full = state.report === 'full';
     $('#resDetails').classList.toggle('full', full);
-    $$('#resDetails .rep').forEach(function (sec) { sec.classList.toggle('hidden', !can(sec.dataset.rep) || (!full && sec.dataset.rep !== state.report)); });
+    $$('#resDetails .rep').forEach(function (sec) { sec.classList.toggle('hidden', !full && sec.dataset.rep !== state.report); });
   }
   /** Older API name: open the report panel (tandem section -> Tandem rules report). */
   function openDetails(sectionId) { openReport(sectionId === 'tandemSection' ? 'tandem' : sectionId === 'noticeSection' ? 'tolls' : sectionId || 'legs'); }
@@ -1120,10 +1260,9 @@
     if (res.demo) li('Data', 'Demo mode: synthetic route, not real ' + esc(res.providerLabel) + ' data.', true);
     var traffic = res.request && res.request.effectiveSettings && res.request.effectiveSettings.considerTraffic != null ? res.request.effectiveSettings.considerTraffic : readPrefs().considerTraffic;
     li('Traffic', traffic === false ? 'Not considered' : t.trafficDelaySec > 60 ? C.formatDuration(t.trafficDelaySec) + ' delay included in drive time' : 'No delay on this route');
-    var HP = can('hos') && F.hosRun ? F.hosRun(res) : null;
-    if (HP) { var lastOff = HP.offs[HP.offs.length - 1], late = HP.stops.filter(function (x) { return x.status === 'late'; }).length;
+    var HP = hosRun(res), lastOff = HP.offs[HP.offs.length - 1], late = HP.stops.filter(function (x) { return x.status === 'late'; }).length;
     li('HOS plan', 'Arrive ' + fmtAt(HP.arriveMs, lastOff) + ' · ' + (HP.totals.restarts ? HP.totals.restarts + ' × 34 h restart, ' : '') + (HP.totals.rests ? HP.totals.rests + ' × 10 h off, ' : '') +
-      HP.totals.breaks + ' × 30 min break' + (HP.totals.breaks === 1 ? '' : 's') + (late ? ' · <b>' + late + ' appointment' + (late === 1 ? '' : 's') + ' late</b>' : ''), late > 0); }
+      HP.totals.breaks + ' × 30 min break' + (HP.totals.breaks === 1 ? '' : 's') + (late ? ' · <b>' + late + ' appointment' + (late === 1 ? '' : 's') + ' late</b>' : ''), late > 0);
     var cur = currentTandem(), ev = cur.mode === 'route' ? cur.ev : T.evaluate({ runs: res.states || [], rules: state.rules, kpraFt: cur.n.kpra, spreadFt: cur.n.spread, trailerLengthFt: cur.n.trailer });
     if (!NON_SEMI[cur.n.type]) {
       if (!ev.loaded) li('Tandems', 'Rules data not loaded — check each state', true);
@@ -1138,7 +1277,7 @@
     if (res.reordered) li('Stop order', 'Re-ordered for the best sequence (' + (res.provider === 'tomtom' ? 'TomTom computeBestOrder' : 'HERE Waypoints Sequence') + ')');
     var nn = r.notices.length + (res.warnings || []).length;
     li('Notices', nn ? nn + ' (see the Tolls &amp; warnings report)' : 'None');
-    var xdn = F.xdTripNote && F.xdTripNote(res); if (xdn) li('Crossdocks', xdn);
+    var xdn = xdTripNote(res); if (xdn) li('Crossdocks', xdn);
     return '<ul class="plain">' + out.join('') + '</ul>';
   }
   function renderDetails(res) {
@@ -1151,7 +1290,7 @@
     var lg = '<div class="dsec"><h5>Schedule</h5><table class="tbl"><tbody>' +
       row3('Depart', dp ? tzName(r.departureTime) : '', dp ? dp.day + ' ' + dp.time : '–') +
       row3('Arrive, driving only', ap ? tzName(r.arrivalTime) : '', ap ? ap.day + ' ' + ap.time : '–') +
-      (can('hos') ? '<tr><td>Arrive with HOS (planner)</td><td id="hosArriveTz"></td><td class="num" id="hosArrive">–</td></tr>' : '') + '</tbody></table></div>';
+      '<tr><td>Arrive with HOS (planner)</td><td id="hosArriveTz"></td><td class="num" id="hosArrive">–</td></tr></tbody></table></div>';
     lg += '<div class="dsec"><h5>Legs</h5><table class="tbl"><thead><tr><th>Leg</th><th class="n">Miles</th><th class="n">Time</th><th class="n">Arrive</th><th class="n">' + (noToll ? 'Toll mi' : 'Tolls') + '</th><th class="n">Cost</th></tr></thead><tbody>';
     r.legs.forEach(function (l, i) {
       var la = isoParts(l.arrivalTime);
@@ -1245,7 +1384,7 @@
     html += sec('settings', settingsReport(res));
     html += sec('stops', '<div class="dsec" id="stopsAlong"><div class="muted">Open this report to find truck stops and fuel along the route.</div></div>');
     html += sec('send', '<div class="dsec" id="sendRep"></div>');
-    html += sec('ifta', '<div class="dsec" id="iftaRep">' + (F.iftaHtml ? F.iftaHtml(res) : '') + '</div>');
+    html += sec('ifta', '<div class="dsec" id="iftaRep">' + iftaHtml(res) + '</div>');
     // Driver note
     html += sec('note', '<div class="dsec"><div class="tnote big" id="driverNoteRep"></div><div class="dact"><button type="button" class="btn gry sm" data-copy><i class="ic-note"></i>Copy driver note</button></div>' +
       '<div class="tdisc">Plain text for the driver: route states and the tandem setting to use. Verify posted signs and current state rules.</div></div>');
@@ -1254,23 +1393,249 @@
     $$('[data-copy]', box).forEach(function (b) { b.onclick = copyNote; });
     $$('i.ic-note', box).forEach(function (el) { el.outerHTML = ICON('note'); });
     renderTandemSection();
-    if (F.renderHos) F.renderHos();
-    if ((state.report === 'send' || state.report === 'full') && F.renderSend) F.renderSend();
+    renderHos();
+    if (state.report === 'send' || state.report === 'full') renderSend();
     drawTruck(currentTandem());
     showReport();
     box.scrollTop = keep;
-    if (F.stopsRerender) F.stopsRerender(res);
+    if (state.stopsShown && state.stopsShown.key === routeKeyOf(res)) renderStops(state.stopsShown.items, state.stopsShown.note);
   }
   // ---------- HOS planner + appointment times (public/js/hos.js) ----------
   function hosPrefs() { var d = { used: 0, cycle: 70, dwell: 60 }; try { return Object.assign(d, JSON.parse(localStorage.getItem('zr.hos') || '{}')); } catch (e) { return d; } }
   function apptStore() { try { return JSON.parse(localStorage.getItem('zr.appts') || '{}'); } catch (e) { return {}; } }
   function offStr(off) { var a = Math.abs(off); return (off < 0 ? '-' : '+') + ('0' + Math.floor(a / 60)).slice(-2) + ':' + ('0' + a % 60).slice(-2); }
-  function msIso(ms, off) { return window.ZRHos.msToLocal(ms, off) + ':00' + offStr(off); }
+  function msIso(ms, off) { return HOS.msToLocal(ms, off) + ':00' + offStr(off); }
   function fmtAt(ms, off) { var iso = msIso(ms, off), p = isoParts(iso); return p.day + ' ' + p.time + ' ' + tzName(iso); }
   function apptKey(i, leg) { return (i + 1) + '|' + (leg.to || ''); }
-  // HOS planner: js/feat/hos.js
-  // truck stops, EIA diesel, rest areas: js/feat/stops.js
-  // IFTA estimate: js/feat/ifta.js
+  /** Plan with the route's legs; each stop keeps its own UTC offset (from the provider's arrival times). */
+  function hosRun(res) {
+    var r = res.route, hp = hosPrefs(), ap = apptStore(), off0 = HOS.offsetMin(r.departureTime) || 0, offs = [];
+    var appts = r.legs.map(function (l, i) { var o = HOS.offsetMin(l.arrivalTime); offs.push(o == null ? off0 : o); var v = ap[apptKey(i, l)]; return v ? HOS.localToMs(v, offs[i]) : null; });
+    var plan = HOS.plan({ legs: r.legs.map(function (l) { return { miles: l.miles, durationSec: l.durationSec, to: l.to }; }), departMs: Date.parse(r.departureTime) || Date.now(),
+      hoursUsed: hp.used, cycleHours: hp.cycle, dwellMin: hp.dwell, appts: appts });
+    plan.offs = offs; plan.off0 = off0; plan.prefs = hp; plan.apptLocal = r.legs.map(function (l, i) { return ap[apptKey(i, l)] || ''; });
+    return plan;
+  }
+  var EV_LABEL = { drive: 'Drive', break: '30-min break', rest: '10-h off duty', restart: '34-h restart', wait: 'Wait (appointment)', stop: 'On duty at stop' };
+  function renderHos() {
+    var res = state.lastResult, box = $('#hosPlan'); if (!res || !box) return;
+    var P = hosRun(res), hp = P.prefs, r = res.route;
+    var a = $('#hosArrive'); if (a) { a.textContent = fmtAt(P.arriveMs, P.offs[P.offs.length - 1]); $('#hosArriveTz').textContent = P.totals.breaks + ' break' + (P.totals.breaks === 1 ? '' : 's') + ', ' + P.totals.rests + ' rest' + (P.totals.rests === 1 ? '' : 's') + (P.totals.restarts ? ', ' + P.totals.restarts + ' restart' : ''); }
+    var h = '<h5>HOS planner</h5><div class="hosin">' +
+      '<label><b>Hours used</b><input type="number" id="hosUsed" min="0" max="70" step="0.5" value="' + hp.used + '"></label>' +
+      '<label><b>Cycle</b><select id="hosCycle"><option value="70"' + (+hp.cycle === 70 ? ' selected' : '') + '>70 h / 8 days</option><option value="60"' + (+hp.cycle === 60 ? ' selected' : '') + '>60 h / 7 days</option></select></label>' +
+      '<label><b>Min at stop</b><input type="number" id="hosDwell" min="0" max="600" step="15" value="' + hp.dwell + '"></label></div>';
+    h += '<table class="tbl hosstops"><thead><tr><th>Stop</th><th>Appointment</th><th class="n">HOS ETA</th><th class="n">Status</th></tr></thead><tbody>';
+    P.stops.forEach(function (st, i) {
+      var off = P.offs[i], cls = st.status === 'late' ? 'over' : st.status === 'tight' ? 'tight' : st.status ? 'ok' : '';
+      var txt = st.status === 'late' ? 'Late ' + C.formatDuration(st.lateMin * 60) : st.status === 'tight' ? 'Tight (' + st.waitMin + ' min early)' : st.status ? 'On time' + (st.waitMin ? ', ' + C.formatDuration(st.waitMin * 60) + ' early' : '') : '<span class="muted">—</span>';
+      h += '<tr><td><b>' + (i + 1) + '. ' + esc(short(st.label)) + '</b><div class="muted tiny">Mile ' + mi(st.mile) + ' · ' + esc(tzName(msIso(st.etaMs, off))) + '</div></td>' +
+        '<td><input type="datetime-local" class="appt" data-i="' + i + '" value="' + esc(P.apptLocal[i]) + '" aria-label="Appointment at stop ' + (i + 1) + ', local time"></td>' +
+        '<td class="n">' + fmtAt(st.etaMs, off) + '</td><td class="n"><span class="' + cls + '">' + txt + '</span></td></tr>';
+    });
+    h += '</tbody></table><table class="tbl hostl"><thead><tr><th>Start</th><th>Activity</th><th class="n">Mile</th><th class="n">Length</th></tr></thead><tbody>';
+    var legEnd = [], acc = 0; r.legs.forEach(function (l) { acc += l.miles; legEnd.push(acc); });
+    var runs = res.states || [];
+    var offAt = function (m, ms) {
+      for (var j = 0; j < runs.length; j++) if (runs[j].code && m >= runs[j].startMile - 0.5 && m <= runs[j].endMile + 0.5) { var so = HOS.stateOffset(runs[j].code, ms); if (so != null) return so; }
+      for (var k = 0; k < legEnd.length; k++) if (m <= legEnd[k] + 0.05) return P.offs[k]; return P.offs[P.offs.length - 1];
+    };
+    P.events.forEach(function (e) {
+      h += '<tr' + (e.type !== 'drive' ? ' class="hosoff"' : '') + '><td>' + fmtAt(e.start, e.mile0 < 0.5 ? P.off0 : offAt(e.mile0, e.start)) + '</td><td>' + (e.type === 'drive' ? '<b>Drive</b> ' + mi(e.mile1 - e.mile0) + ' mi' : esc(e.note || EV_LABEL[e.type])) +
+        '</td><td class="n">' + mi(e.mile0) + '</td><td class="n">' + C.formatDuration((e.end - e.start) / 1000) + '</td></tr>';
+    });
+    h += '</tbody></table><div class="tdisc">FMCSA property-carrying rules: 11 h driving, 14 h window, 30-min break after 8 h driving, 10 h off duty, ' + hp.cycle + ' h cycle (34 h restart). After this trip: ' +
+      P.driveLeftH + ' h driving left in the shift, ' + P.cycleLeftH + ' h left in the cycle. Appointments are local time at the stop. Planning aid only, not a log; traffic and stops change the times.</div>';
+    box.innerHTML = h;
+    var save = function () {
+      localStorage.setItem('zr.hos', JSON.stringify({ used: Math.max(0, Math.min(+$('#hosCycle').value, +$('#hosUsed').value || 0)), cycle: +$('#hosCycle').value, dwell: Math.max(0, +$('#hosDwell').value || 0) }));
+      renderHos();
+    };
+    ['#hosUsed', '#hosCycle', '#hosDwell'].forEach(function (id) { $(id).addEventListener('change', save); });
+    $$('input.appt', box).forEach(function (el) { el.addEventListener('change', function () {
+      var ap = apptStore(), i = +el.dataset.i, k = apptKey(i, r.legs[i]); if (el.value) ap[k] = el.value; else delete ap[k];
+      localStorage.setItem('zr.appts', JSON.stringify(ap)); renderHos();
+    }); });
+  }
+  // ---------- truck stops & fuel along the route (TomTom Search Along Route, cached) ----------
+  function routeCoords(res) { var all = []; res.route.legs.forEach(function (l) { all = all.concat(l.coordinates || []); }); return all; }
+  function routeKeyOf(res) {
+    var c = routeCoords(res); if (!c.length) return '';
+    return [0, 0.25, 0.5, 0.75, 1].map(function (f) { var p = c[Math.min(c.length - 1, Math.round(f * (c.length - 1)))]; return (+p[0]).toFixed(3) + ',' + (+p[1]).toFixed(3); }).join(';') + '|' + Math.round(res.route.totals.miles || 0);
+  }
+  var STOPS_TTL = 7 * 864e5;
+  function loadStopsAlong() {
+    var res = state.lastResult, box = $('#stopsAlong'); if (!res || !box) return;
+    var key = routeKeyOf(res); if (!key) { box.innerHTML = '<div class="muted">No route geometry.</div>'; return; }
+    if (state.stopsShown && state.stopsShown.key === key) return renderStops(state.stopsShown.items, state.stopsShown.note);
+    var lsKey = 'zr.stops.' + key, hit = null;
+    try { hit = JSON.parse(localStorage.getItem(lsKey) || 'null'); } catch (e) { hit = null; }
+    if (hit && Date.now() - hit.t < STOPS_TTL) { state.stopsShown = { key: key, items: hit.items, note: 'saved list from ' + new Date(hit.t).toLocaleDateString() }; return renderStops(hit.items, state.stopsShown.note); }
+    if (state.stopsLoading === key) return;
+    state.stopsLoading = key;
+    box.innerHTML = '<div class="muted">Searching for truck stops along the route…</div>';
+    var c = routeCoords(res), step = Math.max(1, Math.ceil(c.length / 3000));
+    var coords = c.filter(function (_, i) { return i % step === 0 || i === c.length - 1; }).map(function (p) { return [+(+p[0]).toFixed(5), +(+p[1]).toFixed(5)]; });
+    fetch('/api/stops-along', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coords: coords, totalMiles: res.route.totals.miles }) })
+      .then(function (r) { return r.json(); }).then(function (j) {
+        state.stopsLoading = null;
+        if (state.lastResult !== res) return;
+        if (!j.ok) { var b = $('#stopsAlong'); if (b) b.innerHTML = '<div class="warn">' + esc(j.error || 'Search failed') + '</div>'; return; }
+        try { localStorage.setItem(lsKey, JSON.stringify({ t: Date.now(), items: j.items })); } catch (e) { /* storage full: fine */ }
+        state.stopsShown = { key: key, items: j.items, note: j.cached ? 'cached' : j.calls + ' search call' + (j.calls === 1 ? '' : 's') };
+        renderStops(j.items, state.stopsShown.note);
+      }).catch(function (e) { state.stopsLoading = null; var b = $('#stopsAlong'); if (b) b.innerHTML = '<div class="warn">Search failed: ' + esc(e.message) + '</div>'; });
+  }
+  // ---------- EIA weekly diesel averages (/api/diesel) ----------
+  function loadDiesel() {
+    if (state.dieselP) return state.dieselP;
+    state.dieselP = fetch('/api/diesel').then(function (r) { return r.json(); }).then(function (j) { state.diesel = j && j.ok ? j : null; return state.diesel; }, function () { state.diesel = null; return null; });
+    return state.dieselP;
+  }
+  function dieselNote(d) { return 'EIA, week of ' + EIA.weekLabel(d.week); }
+  /** "Use EIA price" (Fuel source = EIA weekly avg): set the trip fuel price to the mileage-weighted EIA average of the route's states. */
+  function applyEiaFuel(res) {
+    if (field('fuelSrc').value !== 'eia' || !res) return;
+    loadDiesel().then(function (d) {
+      if (!d || state.lastResult !== res) return;
+      var avg = EIA.routeAverage(res.states || [], d); if (!avg) return;
+      var v = avg.toFixed(2);
+      if (field('fuelPrice').value !== v) { field('fuelPrice').value = v; saveSettings(); recalcEconomics(); toast('Fuel price set to EIA avg $' + v + ' (' + dieselNote(d) + ')'); }
+    });
+  }
+  // ---------- rest areas (bundled OSM highway=rest_area / services, data/rest-areas.json) ----------
+  function loadRestAreas() {
+    if (state.restP) return state.restP;
+    state.restP = fetch('data/rest-areas.json').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) { state.restData = j; return j; }, function (e) { state.restData = { error: e.message, rows: [] }; return state.restData; });
+    return state.restP;
+  }
+  function restItem(row) { var c = state.restData.cols, o = {}; c.forEach(function (k, i) { o[k] = row[i]; }); return o; }
+  function restParking(o) {
+    if (o.hgv === 'no') return 'no truck parking';
+    if (o.capHgv) return o.capHgv + ' truck spaces';
+    if (o.hgv === 'yes' || o.hgv === 'designated') return 'truck parking';
+    return '';
+  }
+  /** OSM rest areas within ~0.5 mi of the route, with mile markers. */
+  function restAlong(res) {
+    var D = state.restData; if (!D || !D.rows || !D.rows.length) return [];
+    var c = routeCoords(res); if (c.length < 2) return [];
+    var step = Math.max(1, Math.ceil(c.length / 4000)), pts = c.filter(function (_, i) { return i % step === 0 || i === c.length - 1; });
+    var cm = [0]; for (var i = 1; i < pts.length; i++) cm.push(cm[i - 1] + hmi(pts[i - 1], pts[i]));
+    var k = res.route.totals.miles && cm[cm.length - 1] ? res.route.totals.miles / cm[cm.length - 1] : 1;
+    var s = 90, w = 180, n = -90, e = -180; pts.forEach(function (p) { s = Math.min(s, p[0]); n = Math.max(n, p[0]); w = Math.min(w, p[1]); e = Math.max(e, p[1]); });
+    var out = [], LIM = 0.5 / 69; // ~0.5 mi in degrees latitude
+    D.rows.forEach(function (row) {
+      var la = row[0], ln = row[1]; if (la < s - 0.02 || la > n + 0.02 || ln < w - 0.03 || ln > e + 0.03) return;
+      var cos = Math.cos(la * Math.PI / 180), best = -1, bd = LIM * LIM;
+      for (var j = 0; j < pts.length; j++) { var dy = pts[j][0] - la, dx = (pts[j][1] - ln) * cos, d = dy * dy + dx * dx; if (d < bd) { bd = d; best = j; } }
+      if (best < 0) return;
+      var o = restItem(row);
+      var brand = o.kind === 'services' && TRUCK_STOP_RE.test(o.name || '');
+      out.push({ id: 'osm:' + la + ',' + ln, name: o.name || (o.kind === 'services' ? 'Service plaza' : 'Rest area'), kind: brand ? 'truck stop' : o.kind === 'services' ? 'service plaza' : 'rest area', lat: la, lng: ln, st: o.st,
+        address: (o.ref ? '#' + o.ref + ', ' : '') + o.st, parking: restParking(o), toilets: o.toilets, mile: Math.round(cm[best] * k * 10) / 10, detourSec: null, src: 'osm' });
+    });
+    return out;
+  }
+  function hmi(a, b) { var t = Math.PI / 180, dl = (b[0] - a[0]) * t, dg = (b[1] - a[1]) * t, h = Math.sin(dl / 2) * Math.sin(dl / 2) + Math.cos(a[0] * t) * Math.cos(b[0] * t) * Math.sin(dg / 2) * Math.sin(dg / 2); return 7917.5 * Math.asin(Math.min(1, Math.sqrt(h))); }
+  var TRUCK_STOP_RE = /pilot|flying j|love'?s|\bta\b|travelcenters|petro\b|speedway|road ranger|ambest|bosselman|sapp|town pump|kenly|iowa 80|little america|buc-ee|travel (center|stop|plaza)|truck ?stop|kwik|sheetz|wawa|fuel/i;
+  function stopsFilter() { try { return localStorage.getItem('zr.stopsFilter') || 'all'; } catch (e) { return 'all'; } }
+  function isFuel(it) { return it.kind === 'truck stop' || it.kind === 'fuel' || it.kind === 'stop'; }
+  function renderStops(items, note) {
+    var box = $('#stopsAlong'); if (!box) return;
+    var res = state.lastResult;
+    if (!state.restData || !state.diesel && !state.dieselTried) {
+      state.dieselTried = true;
+      Promise.all([loadRestAreas(), loadDiesel()]).then(function () { if (state.lastResult === res) renderStops(items, note); });
+      if (!state.restData) { box.innerHTML = '<div class="muted">Loading rest areas…</div>'; return; }
+    }
+    var osm = restAlong(res);
+    // TomTom rest areas near an OSM one are the same place: keep the OSM entry (it has truck parking tags)
+    var near = function (a, b) { return Math.abs(a.lat - b.lat) < 0.008 && Math.abs(a.lng - b.lng) < 0.01; };
+    var tt = items.filter(function (it) { return !(it.kind === 'rest area' && osm.some(function (o) { return !isFuel(o) && near(o, it); })); });
+    // OSM truck stops that TomTom also found: keep the TomTom row (address, detour) and add the OSM truck-parking tag to it
+    osm = osm.filter(function (o) {
+      if (!isFuel(o)) return true;
+      var m = tt.find(function (it) { return isFuel(it) && near(o, it); });
+      if (m) { m = Object.assign(m, { parking: m.parking || o.parking }); return false; }
+      return true;
+    });
+    var all = tt.concat(osm).sort(function (a, b) { return a.mile - b.mile; });
+    var f = stopsFilter(), shown = all.filter(function (it) { return f === 'all' || (f === 'fuel' ? isFuel(it) : !isFuel(it)); });
+    var nFuel = all.filter(isFuel).length, d = state.diesel;
+    state.stopsLayer.clearLayers();
+    var h = '<div class="chips" role="group" aria-label="Filter">' + [['all', 'All', all.length], ['fuel', 'Fuel', nFuel], ['rest', 'Rest areas', all.length - nFuel]].map(function (c) {
+      return '<button type="button" class="chip' + (f === c[0] ? ' on' : '') + '" data-f="' + c[0] + '" aria-pressed="' + (f === c[0]) + '">' + c[1] + ' <span>' + c[2] + '</span></button>';
+    }).join('') + '</div>';
+    if (d) {
+      var seen = {}, regs = [];
+      (res.states || []).forEach(function (r) { var q = EIA.priceFor(r.code, d); if (q && !seen[q.region]) { seen[q.region] = 1; regs.push(q); } });
+      h += '<div class="eiabar"><b>Avg diesel</b> ' + regs.map(function (q) { return esc(q.label) + ' <b>$' + q.price.toFixed(2) + '</b>'; }).join(' · ') + ' <span class="muted">(' + dieselNote(d) + (d.live ? '' : ', saved copy') + ')</span></div>';
+    }
+    h += '<table class="tbl stops"><thead><tr><th class="n">Mile</th><th>Stop</th><th>Address / parking</th><th class="n">Avg diesel</th><th class="n">Detour</th></tr></thead><tbody>';
+    if (!shown.length) h += '<tr><td colspan="5" class="muted">Nothing found for this filter.</td></tr>';
+    shown.forEach(function (it) {
+      var fuel = isFuel(it), st = fuel ? (it.st || EIA.stateFromAddress(it.address)) : null, q = fuel && d ? EIA.priceFor(st || stateAtMile(res, it.mile), d) : null, rest = !fuel;
+      h += '<tr class="clk" data-lat="' + it.lat + '" data-lng="' + it.lng + '"><td class="n"><b>' + mi(it.mile) + '</b></td><td><b>' + esc(it.name) + '</b> <span class="muted">' + esc(it.kind) + '</span></td><td>' + esc(it.address) +
+        (it.parking ? (it.address ? '<br>' : '') + '<span class="park' + (/no truck/.test(it.parking) ? ' nopark' : '') + '">' + esc(it.parking) + '</span>' : '') +
+        '</td><td class="n">' + (q ? '~$' + q.price.toFixed(2) + '<div class="muted tiny">' + esc(q.label) + '</div>' : '<span class="muted">—</span>') +
+        '</td><td class="n">' + (it.detourSec != null ? Math.max(1, Math.round(it.detourSec / 60)) + ' min' : it.src === 'osm' ? 'near route' : '–') + '</td></tr>';
+      var tip = '<b>' + esc(it.name) + '</b><br>Mile ' + mi(it.mile) + (q ? ' · avg diesel ~$' + q.price.toFixed(2) : '') + (it.parking ? '<br>' + esc(it.parking) : '');
+      L.marker([it.lat, it.lng], { pane: 'markerPane', icon: L.divIcon({ className: '', html: '<div class="fuel-marker' + (rest ? ' rest' : '') + '">' + ICON(rest ? 'bed' : 'fuel') + '</div>', iconSize: [20, 20], iconAnchor: [10, 10] }) })
+        .bindTooltip(tip).bindPopup(tip + (it.address ? '<br>' + esc(it.address) : '') + (it.phone ? '<br>' + esc(it.phone) : '')).addTo(state.stopsLayer);
+    });
+    box.innerHTML = h + '</tbody></table><div class="tdisc">' + items.length + ' truck stops / fuel from TomTom search within a 5-min detour (' + esc(note || '') + '); ' + osm.length +
+      ' rest areas and service plazas from OpenStreetMap (bundled; truck parking where tagged). Mile = distance from the start along the route.' +
+      (d ? ' Diesel prices are EIA weekly regional averages including taxes, not the price at that station.' : '') + ' Check parking and services before you go.</div>';
+    $$('[data-lat]', box).forEach(function (el) { el.addEventListener('click', function () { state.map.setView([+el.dataset.lat, +el.dataset.lng], 14); }); });
+    $$('.chip', box).forEach(function (b) { b.addEventListener('click', function () { try { localStorage.setItem('zr.stopsFilter', b.dataset.f); } catch (e) { /* ignore */ } renderStops(items, note); }); });
+  }
+  function stateAtMile(res, m) { var r = (res.states || []).find(function (x) { return m >= x.startMile - 0.5 && m <= x.endMile + 0.5; }); return r ? r.code : null; }
+  // rest areas map layer (toggle next to Tolls); markers only at zoom >= 7, redrawn on move
+  function drawRestLayer() {
+    if (!state.restLayer) return;
+    state.restLayer.clearLayers();
+    if (!state.restOn || !state.restData || !state.restData.rows) return;
+    if (state.map.getZoom() < 7) return;
+    var b = state.map.getBounds().pad(0.1), n = 0;
+    state.restData.rows.forEach(function (row) {
+      if (n > 800 || !b.contains([row[0], row[1]])) return; n++;
+      var o = restItem(row), p = restParking(o), nm = o.name || (o.kind === 'services' ? 'Service plaza' : 'Rest area');
+      L.marker([row[0], row[1]], { pane: 'markerPane', icon: L.divIcon({ className: '', html: '<div class="ra-marker' + (o.kind === 'services' ? ' sv' : '') + (/no truck/.test(p) ? ' np' : '') + '">' + ICON('bed') + '</div>', iconSize: [16, 16], iconAnchor: [8, 8] }) })
+        .bindTooltip('<b>' + esc(nm) + '</b>' + (p ? '<br>' + esc(p) : '') + (o.toilets ? '<br>toilets' : '')).addTo(state.restLayer);
+    });
+  }
+  function setRestLayer(on) {
+    state.restOn = !!on;
+    try { localStorage.setItem('zr.restLayer', on ? '1' : '0'); } catch (e) { /* ignore */ }
+    var b = $('#restLayerBtn'); if (b) { b.classList.toggle('on', state.restOn); b.setAttribute('aria-pressed', state.restOn ? 'true' : 'false'); }
+    if (!on) { drawRestLayer(); return; }
+    loadRestAreas().then(function () { drawRestLayer(); if (state.map.getZoom() < 7) toast('Zoom in to see rest areas'); });
+  }
+  // ---------- IFTA estimate (bundled IFTA rate matrix) ----------
+  function loadIfta() {
+    if (state.iftaRates || state.iftaP) return;
+    state.iftaP = fetch('data/ifta-rates.json').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) { state.iftaRates = j; }, function (e) { state.iftaRates = { error: e.message }; })
+      .then(function () { state.iftaP = null; var b = $('#iftaRep'); if (b && state.lastResult) b.innerHTML = iftaHtml(state.lastResult); });
+  }
+  function iftaHtml(res) {
+    var R = state.iftaRates;
+    if (!R) return '<div class="muted">Loading IFTA rates…</div>';
+    if (R.error) return '<div class="warn">IFTA rates not loaded (' + esc(R.error) + ')</div>';
+    var tk = readTruck(), est = window.ZRIfta.estimate(res.states || [], tk.mpg, R);
+    var h = '<table class="tbl"><thead><tr><th>State</th><th class="n">Miles</th><th class="n">Gallons</th><th class="n">Rate</th><th class="n">Tax</th></tr></thead><tbody>';
+    if (!est.rows.length) h += '<tr><td colspan="5" class="muted">State mileage not available for this route.</td></tr>';
+    est.rows.forEach(function (r) {
+      h += '<tr><td><b>' + esc(r.code) + '</b> <span class="muted">' + esc(r.name) + '</span></td><td class="n">' + mi(r.miles, 1) + '</td><td class="n">' + r.gallons.toFixed(1) +
+        '</td><td class="n">' + (r.rate == null ? '<span class="muted" title="' + esc(r.note) + '">n/a</span>' : '$' + r.rate.toFixed(3)) + '</td><td class="n">' + (r.tax == null ? '–' : money(r.tax)) + '</td></tr>';
+    });
+    h += '</tbody><tfoot><tr><td>Total</td><td class="n">' + mi(est.miles, 1) + '</td><td class="n">' + est.gallons.toFixed(1) + '</td><td></td><td class="n">' + money(est.tax) + '</td></tr></tfoot></table>';
+    return h + '<div class="tdisc">Gallons = state miles ÷ ' + est.mpg + ' MPG. Rates: ' + esc(R.quarter) + ' diesel, ' + esc(R.status) + ', from the IFTA tax matrix (iftach.org).' +
+      (est.missing.length ? ' No IFTA rate for ' + esc(est.missing.join(', ')) + (est.missing.indexOf('OR') >= 0 ? ' (Oregon uses a weight-mile tax)' : '') + '.' : '') +
+      ' This is the tax due on fuel used per state; net IFTA owed depends on where you buy fuel (tax paid at the pump is credited).</div>';
+  }
   function renderTandemSection() {
     var box = $('#tandemSection'); if (!box || !state.lastResult) return;
     var res = state.lastResult, n = truckNums();
@@ -1344,7 +1709,16 @@
     if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
   }
 
-  // saved trips + Send to Driver live in js/feat/share.js (module "share"); applyTrip and shared-link opening stay here so links always work
+  // ---------- saved trips (localStorage) + JSON export/import (public/js/trips.js) ----------
+  var TRIPS_KEY = 'zr.trips.v1', SHARE_FIELDS = PROFILE_FIELDS.concat(['fuel']); // share links leave out rates and costs
+  function savedTrips() { try { return JSON.parse(localStorage.getItem(TRIPS_KEY) || '[]').map(function (t) { return TRIPS.sanitize(t, TRUCK_FIELDS); }).filter(Boolean); } catch (e) { return []; } }
+  function storeTrips(list) { try { localStorage.setItem(TRIPS_KEY, JSON.stringify(list)); return true; } catch (e) { toast('Could not save: browser storage is full or off'); return false; } }
+  function currentTrip(name, forShare) {
+    var stops = readStopList().filter(Boolean), ap = apptStore(), appts = {};
+    Object.keys(ap).forEach(function (k) { var i = +k.split('|')[0], lab = k.slice(k.indexOf('|') + 1); if (stops[i] && stops[i].label === lab) appts[k] = ap[k]; });
+    var tk = readTruck(), truck = {}; (forShare ? SHARE_FIELDS : TRUCK_FIELDS).forEach(function (k) { if (tk[k] != null) truck[k] = tk[k]; });
+    return TRIPS.sanitize({ name: name, stops: stops, truck: truck, prefs: readPrefs(), appts: appts, hos: hosPrefs() }, TRUCK_FIELDS);
+  }
   /** Put a saved / shared trip back into the form (geocoded points kept, no new geocoding). */
   function applyTrip(t, run) {
     TRUCK_FIELDS.forEach(function (n) { if (t.truck[n] != null && field(n)) field(n).value = t.truck[n]; });
@@ -1360,9 +1734,99 @@
     showView('plan');
     if (run) runTrip();
   }
-  function openFromHash() {
+  function openTrips() {
+    toggleMenu(false);
+    var dlg = $('#tripsDlg'); renderTripList();
+    var st = readStopList().filter(Boolean);
+    $('#tripName').value = st.length >= 2 ? TRIPS.defaultName(st) : '';
+    $('#tripSave').disabled = st.length < 2;
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+  function renderTripList() {
+    var list = savedTrips(), box = $('#tripList');
+    if (!list.length) { box.innerHTML = '<div class="muted tlempty">No saved trips yet. Enter a trip and press Save.</div>'; return; }
+    box.innerHTML = '<table class="tbl trips"><tbody>' + list.map(function (t, i) {
+      return '<tr><td><b>' + esc(t.name) + '</b><div class="muted tiny">' + t.stops.length + ' stops · saved ' + new Date(t.savedAt).toLocaleDateString() + '</div></td>' +
+        '<td class="n"><button type="button" class="btn run sm" data-load="' + i + '">Load</button> <button type="button" class="btn gry sm" data-del="' + i + '" aria-label="Delete ' + esc(t.name) + '">Delete</button></td></tr>';
+    }).join('') + '</tbody></table>';
+    $$('[data-load]', box).forEach(function (b) { b.onclick = function () { var t = savedTrips()[+b.dataset.load]; closeTrips(); if (t) { applyTrip(t, true); toast('Loaded “' + t.name + '”'); } }; });
+    $$('[data-del]', box).forEach(function (b) { b.onclick = function () {
+      var l = savedTrips(), t = l[+b.dataset.del]; if (!t || !window.confirm('Delete the saved trip “' + t.name + '”?')) return;
+      l.splice(+b.dataset.del, 1); storeTrips(l); renderTripList();
+    }; });
+  }
+  function closeTrips() { var d = $('#tripsDlg'); if (d.close) d.close(); else d.removeAttribute('open'); }
+  function initTrips() {
+    $('#tripsBtn').addEventListener('click', openTrips);
+    $('#tripsClose').addEventListener('click', closeTrips);
+    $('#tripSave').addEventListener('click', function () {
+      var t = currentTrip($('#tripName').value); if (!t) { toast('Enter a Start and an End first'); return; }
+      t.savedAt = Date.now();
+      if (storeTrips(TRIPS.upsert(savedTrips(), t))) { toast('Saved “' + t.name + '”'); renderTripList(); }
+    });
+    $('#tripExport').addEventListener('click', function () {
+      var list = savedTrips(); if (!list.length) { toast('No saved trips to export'); return; }
+      var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([TRIPS.exportJson(list)], { type: 'application/json' }));
+      a.download = 'z-router-trips-' + localISO(new Date()) + '.json'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    });
+    $('#tripImportBtn').addEventListener('click', function () { $('#tripImport').click(); });
+    $('#tripImport').addEventListener('change', function (e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      if (f.size > 1024 * 1024) { toast('File too large'); return; }
+      f.text().then(function (txt) {
+        var got = TRIPS.importJson(txt, TRUCK_FIELDS), list = savedTrips();
+        got.reverse().forEach(function (t) { list = TRIPS.upsert(list, t); });
+        storeTrips(list); renderTripList(); toast(got.length ? 'Imported ' + got.length + ' trip' + (got.length === 1 ? '' : 's') : 'No trips found in that file');
+      }).catch(function () { toast('That file is not valid JSON'); }).then(function () { e.target.value = ''; });
+    });
     var t = TRIPS.fromHash(location.hash, TRUCK_FIELDS);
     if (t) { applyTrip(t, true); toast('Trip opened from a shared link'); }
+  }
+
+  // ---------- send route to driver: share link, Google Maps, QR (vendored qrcode-generator), text ----------
+  function shareBase() {
+    var local = location.protocol === 'file:' || /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\])/.test(location.hostname);
+    return local ? SHARE_URL : location.href;
+  }
+  function qrSvg(text) {
+    if (!window.qrcode) return '';
+    var q = window.qrcode(0, 'L'); q.addData(text); q.make();
+    return q.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
+  }
+  function driverText(res, link, gmaps) {
+    var r = res.route, P = hosRun(res), lines = [];
+    lines.push((res.waypoints || []).map(function (w) { return short(w.label); }).join(' → ') + ': ' + mi(r.totals.miles) + ' mi, ' + C.formatDuration(r.totals.durationSec) + ' driving' +
+      (r.tolls.total > 0 ? ', tolls ~' + money(r.tolls.total, 0) : ''));
+    lines.push('Depart ' + fmtAt(Date.parse(r.departureTime), P.off0));
+    P.stops.forEach(function (st, i) {
+      lines.push((i === P.stops.length - 1 ? 'End: ' : 'Stop ' + (i + 1) + ': ') + short(st.label) + ' — ETA ' + fmtAt(st.etaMs, P.offs[i]) +
+        (st.apptMs != null ? ' (appt ' + fmtAt(st.apptMs, P.offs[i]) + ', ' + (st.status === 'late' ? 'LATE ' + C.formatDuration(st.lateMin * 60) : st.status) + ')' : ''));
+    });
+    if (P.totals.rests || P.totals.restarts) lines.push('HOS: ' + (P.totals.restarts ? P.totals.restarts + ' × 34 h restart, ' : '') + P.totals.rests + ' × 10 h off, ' + P.totals.breaks + ' × 30 min break');
+    if (state.lastNote) lines.push(state.lastNote);
+    lines.push('Truck route: ' + link);
+    lines.push('Google Maps (car directions, follow the truck route): ' + gmaps);
+    return lines.join('\n');
+  }
+  function renderSend() {
+    var res = state.lastResult, box = $('#sendRep'); if (!res || !box) return;
+    var t = currentTrip(null, true);
+    if (!t) { box.innerHTML = '<div class="muted">Enter a Start and an End first.</div>'; return; }
+    var link = TRIPS.shareUrl(shareBase(), t), gm = TRIPS.googleMapsUrl(res.waypoints.map(function (w) { return { lat: w.lat, lng: w.lng, label: w.label }; }));
+    renderTandemSection();
+    var text = driverText(res, link, gm);
+    box.innerHTML = '<div class="sendgrid"><div class="sendq">' + qrSvg(link) + '<div class="muted tiny">Scan to open this trip</div></div><div class="sendl">' +
+      '<label class="sl"><b>Trip link</b><span class="srow"><input type="text" readonly id="shareLink" value="' + esc(link) + '"><button type="button" class="btn gry sm" data-cp="link">Copy</button></span></label>' +
+      '<label class="sl"><b>Google Maps</b><span class="srow"><input type="text" readonly id="gmapsLink" value="' + esc(gm) + '"><button type="button" class="btn gry sm" data-cp="gm">Copy</button><a class="btn gry sm" target="_blank" rel="noopener" href="' + esc(gm) + '">Open</a></span></label>' +
+      '</div></div><label class="sl"><b>Text for the driver</b><textarea id="driverText" rows="9" readonly>' + esc(text) + '</textarea></label>' +
+      '<div class="dact"><button type="button" class="btn run sm" data-cp="text">Copy text</button><a class="btn gry sm" href="sms:?&body=' + encodeURIComponent(text) + '">Text message</a>' +
+      '<a class="btn gry sm" href="mailto:?subject=' + encodeURIComponent('Route: ' + TRIPS.defaultName(t.stops)) + '&body=' + encodeURIComponent(text) + '">Email</a></div>' +
+      '<div class="tdisc">The link reopens this trip in Z Router (stops, truck size, HOS and appointments; no rates or costs). ' +
+      (shareBase() === SHARE_URL ? 'Links open on the web version (' + esc(SHARE_URL.replace(/^https:\/\//, '')) + '). ' : '') +
+      'Google Maps uses car routing, so the driver should follow the truck route. The QR code is made in the browser; nothing is sent anywhere until you send it.</div>';
+    var cp = { link: [link, 'Trip link copied'], gm: [gm, 'Google Maps link copied'], text: [text, 'Driver text copied'] };
+    $$('[data-cp]', box).forEach(function (b) { b.onclick = function () { copyText(cp[b.dataset.cp][0], cp[b.dataset.cp][1]); }; });
   }
 
   // ---------- economics ----------
@@ -1415,6 +1879,7 @@
   }
   function resetTrip() {
     writeStopList([null, null]);
+    state.via = []; drawVia();
     Object.keys(TRIP_ONLY).forEach(function (k) { if (field(k)) field(k).value = ''; });
     clearRoute();
     if (state.searchMarker) { state.map.removeLayer(state.searchMarker); state.searchMarker = null; }
@@ -1488,15 +1953,14 @@
     else if (cfg.demo) showBanner('<b>Demo mode</b> (' + esc(cfg.providerLabel) + ' mock): routes are synthetic, for UI testing only.');
     onTandemInput();
     loadRules().then(onTandemInput);
-    openFromHash();
+    initTrips();
     initTraffic();
+    initCrossdocks();
     applyLinkParams();
-    booted = true;
-    Object.keys(MODS).forEach(function (k) { if (MODS[k].init) MODS[k].init(); });
     window.TruckRouter = { state: state, runTrip: runTrip, setWaypoint: setWaypoint, readTruck: readTruck, readPrefs: readPrefs, renderResult: renderResult,
       currentTandem: currentTandem, openDetails: openDetails, openReport: openReport, closeDetails: closeDetails, copyNote: copyNote, addStopRow: addStopRow,
       readStopList: readStopList, applyReorder: applyReorder, setTab: goSetting, goSetting: goSetting, showView: showView,
-      setSettingsOpen: setSettingsOpen, writeStopList: writeStopList, can: can };
+      setSettingsOpen: setSettingsOpen, writeStopList: writeStopList };
   }
   var debouncedEcon = debounce(recalcEconomics, 250);
 
@@ -1514,7 +1978,7 @@
     var q; try { q = new URLSearchParams(location.search); } catch (e) { return; }
     var showXd = q.get('xdock') === '1';
     var from = linkPlace(q.get('from')), to = linkPlace(q.get('to')), stops = q.getAll('stop').map(linkPlace).filter(Boolean);
-    if (showXd && can('crossdocks')) setTimeout(function () { if (F.setXdLayer) F.setXdLayer(true, true); }, 0); // after the Crossdocks module's init
+    if (showXd) { setXdLayer(true, true); }
     if (!from && !to && !stops.length) { if (showXd) cleanUrl(); return; }
     if (stops.length > S.MAX_STOPS) { showMessage('This link has ' + stops.length + ' stops; Z Router takes ' + S.MAX_STOPS + '. The first ' + S.MAX_STOPS + ' were kept.', 'warn'); stops = stops.slice(0, S.MAX_STOPS); }
     writeStopList([from].concat(stops, [to]));
@@ -1529,17 +1993,158 @@
   }
   function cleanUrl() { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* ignore */ } }
 
+  // ---------- Crossdocks layer: the partner list from the Freight Board's Crossdock section ----------
+  // Same website as the Freight Board, so its saved list (synced through the Google Sheet) is readable here.
+  // Addresses are looked up once (TomTom search) and remembered in this browser.
+  var XD_KEY = 'fcbv2_xdrop_partners', XD_GEO_KEY = 'zr.xdockGeo.v2'; // v2 (0.9.4): points checked against their city
+  var xd = { list: [], geo: {}, on: false, busy: false, defaults: null };
+  function xdKey(p) { return String(p.addr || p.city || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  function xdLoadGeo() { try { xd.geo = JSON.parse(localStorage.getItem(XD_GEO_KEY) || '{}') || {}; } catch (e) { xd.geo = {}; } }
+  function xdSaveGeo() { try { localStorage.setItem(XD_GEO_KEY, JSON.stringify(xd.geo)); } catch (e) { /* ignore */ } }
+  function xdReadList() {
+    var list = null;
+    try { var raw = localStorage.getItem(XD_KEY); if (raw) list = JSON.parse(raw); } catch (e) { list = null; }
+    if (Array.isArray(list)) return Promise.resolve({ list: list, from: 'board' });
+    if (xd.defaults) return Promise.resolve({ list: xd.defaults, from: 'default' });
+    return fetch('data/crossdocks-default.json?v=0.9.5').then(function (r) { return r.json(); })
+      .then(function (j) { xd.defaults = Array.isArray(j) ? j : []; return { list: xd.defaults, from: 'default' }; })
+      .catch(function () { return { list: [], from: 'none' }; });
+  }
+  /* v0.9.4: 0.9.3 took the first hit of a general search, which can be a business with a similar name far away
+   * (Sturtevant, WI "11201 Enterprise Way" landed off). Now: find the CITY first, then search only street
+   * addresses near it, and keep the address point only if it is within 35 mi of that city; otherwise use the city. */
+  function xdCityText(p) {
+    var c = String(p.city || '').replace(/\(.*?\)/g, '').trim();
+    if (!/,\s*[A-Z]{2}\b/.test(c)) { var m = String(p.addr || '').match(/([A-Za-z .'-]+),\s*([A-Z]{2})\b(?:\s+\d{5})?\s*$/); if (m) c = m[1].trim() + ', ' + m[2]; }
+    return c;
+  }
+  function xdLookup(q, idx, at) {
+    return api('/api/geocode?q=' + encodeURIComponent(q) + (idx ? '&idx=' + idx : '') + (at ? '&at=' + at.lat.toFixed(4) + ',' + at.lng.toFixed(4) : ''))
+      .then(function (j) { return j && j.ok && j.item ? j.item : null; }, function () { return null; });
+  }
+  function xdMiles(a, b) {
+    var R = 3958.8, r = Math.PI / 180, dl = (b.lat - a.lat) * r, dg = (b.lng - a.lng) * r;
+    var h = Math.sin(dl / 2) * Math.sin(dl / 2) + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dg / 2) * Math.sin(dg / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  function xdGeocode(p) {
+    var cityQ = xdCityText(p), addrQ = String(p.addr || '').trim();
+    var cityP = cityQ ? xdLookup(cityQ, 'Geo').then(function (c) { return c || xdLookup(cityQ, ''); }) : Promise.resolve(null);
+    return cityP.then(function (c) {
+      if (!addrQ || addrQ.toLowerCase() === cityQ.toLowerCase()) return c ? { lat: c.lat, lng: c.lng, approx: false, check: 'city' } : null;
+      // strip a leading company name ("Rick Cargo, 300 Brogdon Rd ...") so the street search sees the address
+      var street = addrQ.replace(/^[^,\d]*[A-Za-z][^,\d]*,\s*(?=\d)/, '');
+      return xdLookup(street, 'PAD,Addr,Str', c).then(function (a) {
+        if (a && (!c || xdMiles(a, c) <= 35)) return { lat: a.lat, lng: a.lng, approx: false, check: c ? Math.round(xdMiles(a, c)) + ' mi from city' : 'no city' };
+        if (c) return { lat: c.lat, lng: c.lng, approx: true, check: a ? 'address hit was ' + Math.round(xdMiles(a, c)) + ' mi away; city used' : 'address not found; city used' };
+        return a ? { lat: a.lat, lng: a.lng, approx: false, check: 'no city check' } : null;
+      });
+    });
+  }
+  /** Look up the partners that have no map point yet, one at a time. */
+  function xdLocateMissing() {
+    if (xd.busy) return; var todo = xd.list.filter(function (p) { var g = xd.geo[xdKey(p)]; return xdKey(p) && !(g && (isFinite(g.lat) || g.failedAt > Date.now() - 864e5)); });
+    if (!todo.length) return;
+    xd.busy = true;
+    var i = 0, next = function () {
+      if (i >= todo.length) { xd.busy = false; xdSaveGeo(); xdDraw(); return; }
+      var p = todo[i++];
+      xdGeocode(p).then(function (g) { xd.geo[xdKey(p)] = g ? { lat: g.lat, lng: g.lng, approx: g.approx, check: g.check, at: Date.now() } : { failedAt: Date.now() }; if (i % 5 === 0) { xdSaveGeo(); xdDraw(); } setTimeout(next, 150); });
+    };
+    next();
+  }
+  function xdPoints() {
+    return xd.list.map(function (p) { var g = xd.geo[xdKey(p)]; return g && isFinite(g.lat) ? { p: p, lat: g.lat, lng: g.lng, approx: !!g.approx } : null; }).filter(Boolean);
+  }
+  function xdPopup(x, off) {
+    var p = x.p;
+    return '<div class="xdpop"><b>' + esc(p.city || 'Crossdock') + '</b>' + (x.approx ? ' <span class="muted tiny">(city only, address not found)</span>' : '') +
+      (p.addr ? '<br>' + esc(p.addr) : '') + (p.contact ? '<br>' + esc(p.contact) : '') + (p.price ? '<br><span class="xdprice">' + esc(p.price) + '</span>' : '') +
+      (off ? '<br><span class="muted">' + esc(off) + '</span>' : '') +
+      '<br><button data-act="start">Set as Start</button><button data-act="stop">Add as Stop</button><button data-act="end">Set as End</button></div>';
+  }
+  function xdDraw() {
+    if (!state.xdLayer) return;
+    state.xdLayer.clearLayers();
+    if (!xd.on) return;
+    var near = state.lastResult ? xdNearRoute(state.lastResult, 1e9) : null, byKey = {};
+    (near || []).forEach(function (n) { byKey[xdKey(n.x.p)] = n; });
+    xdPoints().forEach(function (x) {
+      var n = byKey[xdKey(x.p)], off = n ? (n.offMi < 1 ? 'on the route' : mi(n.offMi) + ' mi off the route') + ' at mile ~' + mi(n.mile) : '';
+      var item = { label: (x.p.addr || x.p.city), lat: x.lat, lng: x.lng };
+      var m = L.marker([x.lat, x.lng], { pane: 'markerPane', title: x.p.city || '', icon: L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+        html: '<div class="xd-marker' + (n && n.offMi <= 25 ? ' near' : '') + '">X</div>' }) })
+        .bindTooltip('<b>' + esc(x.p.city || 'Crossdock') + '</b>' + (x.p.price ? '<br>' + esc(x.p.price) : '') + (off ? '<br>' + esc(off) : ''))
+        .bindPopup(xdPopup(x, off));
+      m.on('popupopen', function (ev) { bindPopupButtons(ev.popup.getElement(), item); });
+      m.addTo(state.xdLayer);
+    });
+  }
+  /** Crossdocks by distance from the route line; mile = where along the route they are closest. */
+  function xdNearRoute(res, maxMi) {
+    var pts = []; (res.route.legs || []).forEach(function (l) { (l.coordinates || []).forEach(function (c) { pts.push(c); }); });
+    if (pts.length < 2) return [];
+    var R = 3958.8, rad = Math.PI / 180, hav = function (a, b) {
+      var dl = (b[0] - a[0]) * rad, dg = (b[1] - a[1]) * rad, h = Math.sin(dl / 2) * Math.sin(dl / 2) + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dg / 2) * Math.sin(dg / 2);
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+    };
+    var cum = [0]; for (var k = 1; k < pts.length; k++) cum.push(cum[k - 1] + hav(pts[k - 1], pts[k]));
+    var scale = res.route.totals.miles && cum[cum.length - 1] ? res.route.totals.miles / cum[cum.length - 1] : 1;
+    var stepN = Math.max(1, Math.floor(pts.length / 4000));
+    return xdPoints().map(function (x) {
+      var best = Infinity, at = 0;
+      for (var i = 0; i < pts.length; i += stepN) { var d = hav([x.lat, x.lng], pts[i]); if (d < best) { best = d; at = cum[i]; } }
+      return { x: x, offMi: best, mile: at * scale };
+    }).filter(function (n) { return n.offMi <= maxMi; }).sort(function (a, b) { return a.mile - b.mile; });
+  }
+  function setXdLayer(on, fit) {
+    if (PUBLIC || state.guest) return; // crossdock partners are for staff only
+    xd.on = !!on;
+    try { localStorage.setItem('zr.xdLayer', on ? '1' : '0'); } catch (e) { /* ignore */ }
+    var b = $('#xdLayerBtn'); if (b) { b.classList.toggle('on', xd.on); b.setAttribute('aria-pressed', xd.on ? 'true' : 'false'); }
+    if (!on) { xdDraw(); return; }
+    xdRefresh().then(function () {
+      xdDraw();
+      var pts = xdPoints();
+      if (fit && pts.length) state.map.fitBounds(L.latLngBounds(pts.map(function (x) { return [x.lat, x.lng]; })), { padding: [60, 60], maxZoom: 8 });
+      if (!xd.list.length) toast('No crossdock partners yet: add them in the Freight Board → Crossdock section');
+    });
+  }
+  function xdRefresh() {
+    return xdReadList().then(function (r) { xd.list = (r.list || []).filter(function (p) { return p && (p.city || p.addr); }); xd.from = r.from; xdDraw(); xdLocateMissing(); });
+  }
+  function initCrossdocks() {
+    xdLoadGeo();
+    state.xdLayer = L.layerGroup().addTo(state.map);
+    var b = $('#xdLayerBtn');
+    if (PUBLIC) { state.guest = true; if (b) b.remove(); return; }
+    // 2026-10-22: guest accounts never see the company's crossdock partners (the server refuses the list too)
+    var who = /^https?:$/.test(location.protocol)
+      ? fetch('/whoami', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+      : Promise.resolve(null);
+    who.then(function (j) {
+      if (j && j.staff === false) { state.guest = true; if (b) b.remove(); return; }
+      if (b) b.addEventListener('click', function () { setXdLayer(!xd.on, !xd.on); });
+      var on = true; try { on = localStorage.getItem('zr.xdLayer') !== '0'; } catch (e) { /* ignore */ }
+      if (on) setXdLayer(true, false);
+      // the Freight Board (another tab, or the page around this one) changed the list
+      window.addEventListener('storage', function (e) { if (e.key === XD_KEY && xd.on) xdRefresh(); });
+    });
+  }
+  /** Trip notes line: crossdock partners within 25 mi of this route, in route order. */
+  function xdTripNote(res) {
+    if (!xd.list.length) return null;
+    var near = xdNearRoute(res, 25);
+    if (!near.length) return 'None within 25 mi of this route';
+    return near.slice(0, 8).map(function (n) { return esc(n.x.p.city) + ' <span class="muted">(mile ~' + mi(n.mile) + (n.offMi >= 1 ? ', ' + mi(n.offMi) + ' mi off' : '') + ')</span>'; }).join(' · ') +
+      (near.length > 8 ? ' · +' + (near.length - 8) + ' more' : '');
+  }
   function toggleMenu(open) {
     var m = $('#settingsMenu'); if (!m) return;
     m.classList.toggle('hidden', !open); $('#settingsBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 
-  (function drainModules() {
-    var q = window.ZRXQ || [];
-    window.ZRXQ = { push: function (m) { defineMod(m[0], m[1]); } };
-    q.forEach(function (m) { defineMod(m[0], m[1]); });
-  })();
-  (window.ZRGate ? window.ZRGate.ready : Promise.resolve()).then(function () { return api('/api/config'); }).then(function (cfg) {
+  api('/api/config').then(function (cfg) {
     if (!cfg || !cfg.ok) cfg = { configured: false, tiles: 'osm', truckTypes: null, hazmat: [] };
     if (cfg.configured == null) cfg.configured = !!cfg.hereConfigured;
     boot(cfg);

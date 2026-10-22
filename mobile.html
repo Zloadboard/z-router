@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Z Router phone page (added 2026-10-16). Same routing engine as index.html (static-api.js + zr-lib.js), simpler screen.
+     The full router (index.html) is not changed by this page. Settings live in this browser under zr.mobile.settings.v1. -->
+<title>Z Router</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#184a7e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Z Router">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="mobile-manifest.json" crossorigin="use-credentials">
+<link rel="icon" href="router-icon-192.png">
+<link rel="apple-touch-icon" href="router-icon-180.png">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=0.9.5">
+<style>
+:root{--blue:#184a7e;--blue-d:#123b66;--blue-l:#e6eef7;--line:#d3dbe5;--muted:#5b6b7f;--red:#b42318;--green:#15803d;--bg:#fff;--ink:#0f172a}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+.hidden{display:none!important}
+header{flex:none;display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;background:var(--blue);color:#fff}
+header .logo{width:30px;height:30px;border-radius:7px;background:#fff;display:grid;place-items:center;flex:none}
+header .logo svg{width:20px;height:20px;fill:var(--blue)}
+header h1{font-size:18px;margin:0;flex:1;font-weight:700}
+.hbtn{border:0;background:var(--blue-d);color:#fff;border-radius:8px;height:36px;min-width:40px;padding:0 10px;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600}
+.hbtn svg{width:18px;height:18px;fill:#fff}
+/* trip form */
+#form{flex:none;padding:10px 12px 12px;border-bottom:1px solid var(--line);background:#fff;max-height:60vh;overflow:auto}
+.wp{display:flex;align-items:center;gap:8px;margin-bottom:8px;position:relative}
+.badge{width:26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;font-weight:700;font-size:13px;display:grid;place-items:center;flex:none}
+.badge.end{background:#0f172a}
+.wp input{flex:1;min-width:0;height:44px;border:1px solid #9aa8b8;border-radius:9px;padding:0 12px;font-size:16px;background:#fff}
+.wp input:focus{outline:2px solid var(--blue);outline-offset:-1px;border-color:var(--blue)}
+.wp .x{width:36px;height:44px;border:0;background:none;color:var(--muted);font-size:22px;flex:none}
+.sug{position:absolute;left:34px;right:0;top:46px;z-index:2000;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 8px 24px rgba(15,23,42,.18);list-style:none;margin:0;padding:4px 0;max-height:260px;overflow:auto}
+.sug li{padding:11px 12px;font-size:15px;border-bottom:1px solid #eef2f6}
+.sug li:last-child{border-bottom:0}
+.sug li:active,.sug li.on{background:var(--blue-l)}
+.sug li.act{color:var(--blue);font-weight:600}
+.sug li.mut{color:#64748b}
+.rowbtns{display:flex;gap:8px;margin-top:2px}
+.lnk{border:0;background:none;color:var(--blue);font-weight:600;padding:8px 2px;font-size:15px}
+.run{flex:1;height:48px;border:0;border-radius:10px;background:var(--blue);color:#fff;font-weight:700;font-size:17px}
+.run:disabled{opacity:.6}
+.msg{margin:8px 0 0;padding:9px 11px;border-radius:8px;font-size:14px;background:#fef2f2;color:var(--red);border:1px solid #fecaca}
+.msg.info{background:#f1f5f9;color:#334155;border-color:var(--line)}
+/* compact trip line (after a run) */
+#tripLine{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);background:#fff;font-size:15px}
+#tripLine .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+#tripLine button{flex:none;height:34px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--blue);font-weight:600;padding:0 12px;font-size:14px}
+/* map */
+#map{flex:1 1 auto;min-height:160px;background:#eef2f6}
+.mk{width:26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;font:700 13px/22px system-ui,sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.mk.end{background:#0f172a}
+/* result card */
+#card{flex:none;padding:10px 14px calc(env(safe-area-inset-bottom) + 10px);border-top:1px solid var(--line);background:#fff;box-shadow:0 -4px 14px rgba(15,23,42,.08)}
+.big{font-size:22px;font-weight:800;letter-spacing:-.01em}
+.big small{font-size:15px;font-weight:600;color:var(--muted)}
+.line{font-size:15px;margin-top:3px;color:#1e293b}
+.line b{font-weight:700}
+.line.muted{color:var(--muted);font-size:13px}
+.alert{margin-top:6px;font-size:13.5px;color:var(--red);font-weight:600}
+.acts{display:flex;gap:8px;margin-top:10px}
+.acts button{flex:1;height:44px;border-radius:10px;border:1px solid var(--line);background:#fff;font-weight:700;font-size:15px;color:var(--blue)}
+.acts button.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+/* bottom sheets */
+.sheet{position:fixed;inset:0;z-index:3000;background:rgba(15,23,42,.45);display:flex;align-items:flex-end}
+.sheet .box{background:#fff;width:100%;max-height:86vh;border-radius:16px 16px 0 0;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom)}
+.sheet .sh{display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+.sheet .sh h2{flex:1;margin:0;font-size:17px}
+.sheet .sh button{border:0;background:#eef2f6;border-radius:8px;height:34px;padding:0 12px;font-weight:600;color:var(--blue)}
+.sheet .sb{overflow:auto;padding:6px 14px 14px}
+.dir{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #eef2f6;font-size:15px}
+.dir .n{color:var(--muted);font-size:13px;min-width:22px;padding-top:1px}
+.dir .d{flex:1}
+.dir .m{color:var(--muted);font-size:13px;white-space:nowrap;padding-top:1px}
+.legh{margin:12px 0 2px;font-size:13px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.03em}
+.fld{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid #eef2f6;font-size:15px}
+.fld span{color:#1e293b}
+.fld input,.fld select{height:40px;border:1px solid #9aa8b8;border-radius:8px;padding:0 10px;font-size:16px;background:#fff;width:150px;text-align:right}
+.fld select{text-align:left;width:190px}
+.fld .pair{display:flex;gap:6px;align-items:center}
+.fld .pair input{width:70px}
+.seg{display:flex;border:1px solid var(--blue);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:#fff;color:var(--blue);height:38px;padding:0 14px;font-weight:600;font-size:14px}
+.seg button.on{background:var(--blue);color:#fff}
+.sw{width:22px;height:22px}
+.shead{margin:14px 0 2px;font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.note{font-size:13px;color:var(--muted);margin-top:10px}
+textarea{width:100%;min-height:150px;border:1px solid var(--line);border-radius:9px;padding:10px;font:14px/1.4 system-ui,sans-serif}
+.sacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.sacts a,.sacts button{flex:1 1 45%;height:44px;border-radius:10px;border:1px solid var(--line);background:#fff;font-weight:700;font-size:15px;color:var(--blue);display:grid;place-items:center;text-decoration:none}
+.sacts .pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 90px);transform:translateX(-50%);background:#0f172a;color:#fff;padding:9px 14px;border-radius:9px;font-size:14px;z-index:4000}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 5h13.5v11.5H1z"/><path d="M15.5 8h4.3l3.2 4.2v4.3h-7.5zM17 9.4v3h4.3l-2.2-3z"/><path d="M5.5 21a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2z"/><path d="M18.5 21a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2z"/></svg></div>
+  <h1>Z Router</h1>
+  <button type="button" class="hbtn" id="setBtn" aria-label="Truck and route settings"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Truck</button>
+</header>
+
+<form id="form" autocomplete="off">
+  <div id="wps"></div>
+  <div class="rowbtns">
+    <button type="button" class="lnk" id="addStop">+ Add stop</button>
+    <span style="flex:1"></span>
+    <button type="button" class="lnk" id="swapBtn" title="Swap Start and End">⇅ Swap</button>
+  </div>
+  <div class="rowbtns"><button type="submit" class="run" id="runBtn">Run trip</button></div>
+  <div class="msg hidden" id="msg"></div>
+</form>
+
+<div id="tripLine" class="hidden"><span class="t" id="tripText"></span><button type="button" id="editBtn">Edit</button></div>
+
+<div id="map"></div>
+
+<div id="card" class="hidden">
+  <div class="big" id="cDist"></div>
+  <div class="line" id="cEta"></div>
+  <div class="line" id="cCost"></div>
+  <div class="line muted" id="cTruck"></div>
+  <div class="alert hidden" id="cAlert"></div>
+  <div class="acts">
+    <button type="button" id="dirBtn">Directions</button>
+    <button type="button" class="pri" id="sendBtn">Send</button>
+    <button type="button" id="fullBtn">Full router</button>
+  </div>
+</div>
+
+<div class="sheet hidden" id="sheet" role="dialog" aria-modal="true">
+  <div class="box"><div class="sh"><h2 id="sheetTitle"></h2><button type="button" id="sheetClose">Done</button></div><div class="sb" id="sheetBody"></div></div>
+</div>
+
+<script src="vendor/leaflet/leaflet.js?v=0.9.5"></script>
+<script src="js/calc.js?v=0.9.5"></script>
+<script src="js/trips.js?v=0.9.5"></script>
+<script src="config.js?v=0.9.9"></script>
+<script src="js/zr-lib.js?v=0.9.6"></script>
+<script src="js/local-places.js?v=0.9.5t2"></script>
+<script src="js/static-api.js?v=0.9.7"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.TRCalc, TRIPS = window.ZRTrips;
+  var $ = function (s, el) { return (el || document).querySelector(s); };
+  var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function api(url, opts) { return fetch(url, opts).then(function (r) { return r.json().catch(function () { return { ok: false, error: 'Bad response (HTTP ' + r.status + ')' }; }); }); }
+  function mi(v, d) { return (+v || 0).toLocaleString('en-US', { maximumFractionDigits: d == null ? 0 : d }); }
+  function money(v) { return '$' + Math.round(+v || 0).toLocaleString('en-US'); }
+  function toast(t) { var d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(function () { d.remove(); }, 1800); }
+  var LETTERS = 'ABCDEFG', MAX_STOPS = 5;
+  var DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  /** "Sat 2:10 PM CDT" in the ISO string's own time zone. */
+  function when(iso) {
+    var m = String(iso || '').match(/^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)[\d:.]*([+-]\d\d):?(\d\d)$/);
+    if (!m) { // no offset in the time (e.g. "...Z"): show it in this phone's time zone
+      var d = new Date(iso); if (!isFinite(d)) return '';
+      return d.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).replace(',', '');
+    }
+    var y = +m[1], day = Date.UTC(y, +m[2] - 1, +m[3]), h = +m[4], ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12 || 12;
+    var nthSun = function (mon, n) { var f = new Date(Date.UTC(y, mon, 1)).getUTCDay(); return Date.UTC(y, mon, 1 + (7 - f) % 7 + 7 * (n - 1)); };
+    var dst = day >= nthSun(2, 2) && day < nthSun(10, 1), off = String(+m[6]);
+    var tz = (dst ? { '-4': 'EDT', '-5': 'CDT', '-6': 'MDT', '-7': 'PDT' } : { '-5': 'EST', '-6': 'CST', '-7': 'MST', '-8': 'PST' })[off] || ('UTC' + m[6]);
+    return DOW[new Date(day).getUTCDay()] + ' ' + h12 + ':' + m[5] + ' ' + ap + ' ' + tz;
+  }
+  function dur(sec) { var m = Math.round((+sec || 0) / 60), h = Math.floor(m / 60); m %= 60; return (h ? h + ' h ' : '') + m + ' min'; }
+  function short(label) { return String(label || '').replace(/,?\s*(USA|United States)$/i, '').replace(/\s+\d{5}(-\d{4})?$/, ''); }
+
+  // ---------- settings (this phone only; first time: copied from the full router's saved settings if any) ----------
+  var SKEY = 'zr.mobile.settings.v1', FULL_KEY = 'truckrouter.settings.v2';
+  var PRESETS = {
+    dryvan53: { label: '53′ Dry Van', v: { type: 'semi', axleCount: '5', heightFt: 13, heightIn: 6, lengthFt: 53, lengthIn: 0, widthFt: 8, widthIn: 6, weightLbs: 80000, trailerFt: 53 } },
+    reefer53: { label: '53′ Reefer', v: { type: 'semi', axleCount: '5', heightFt: 13, heightIn: 6, lengthFt: 53, lengthIn: 0, widthFt: 8, widthIn: 6, weightLbs: 80000, trailerFt: 53 } },
+    flatbed48: { label: '48′ Flatbed', v: { type: 'semi', axleCount: '5', heightFt: 13, heightIn: 6, lengthFt: 48, lengthIn: 0, widthFt: 8, widthIn: 6, weightLbs: 80000, trailerFt: 48 } },
+    straight26: { label: '26′ Straight Truck', v: { type: 'straight', axleCount: '2', heightFt: 13, heightIn: 0, lengthFt: 26, lengthIn: 0, widthFt: 8, widthIn: 6, weightLbs: 26000, trailerFt: '' } },
+    bobtail: { label: 'Bobtail', v: { type: 'bobtail', axleCount: '3', heightFt: 13, heightIn: 6, lengthFt: 22, lengthIn: 0, widthFt: 8, widthIn: 6, weightLbs: 20000, trailerFt: '' } }
+  };
+  var DEFAULT = { preset: 'dryvan53', truck: Object.assign({ hazmat: '', maxSpeedMph: '65', mpg: '6.5', fuelPrice: '3.80', costPerMile: '0.80', costPerHour: '0' }, PRESETS.dryvan53.v),
+    prefs: { routeType: 'fast', avoidTolls: false, considerTraffic: true } };
+  function loadSettings() {
+    var s = null;
+    try { s = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch (e) { /* storage off */ }
+    if (!s) {
+      s = JSON.parse(JSON.stringify(DEFAULT));
+      try {
+        var f = JSON.parse(localStorage.getItem(FULL_KEY) || 'null');
+        if (f && f.truck) { Object.keys(f.truck).forEach(function (k) { if (f.truck[k] !== '' && f.truck[k] != null) s.truck[k] = f.truck[k]; }); s.preset = /^p:/.test(f.preset || '') ? f.preset.slice(2) : ''; }
+        if (f && f.prefs) ['routeType', 'avoidTolls', 'considerTraffic', 'avoidFerries', 'avoidTunnels', 'avoidDirtRoads'].forEach(function (k) { if (k in f.prefs) s.prefs[k] = f.prefs[k]; });
+      } catch (e) { /* ignore */ }
+    }
+    s.truck = Object.assign({}, DEFAULT.truck, s.truck || {}); s.prefs = Object.assign({}, DEFAULT.prefs, s.prefs || {});
+    return s;
+  }
+  var S = loadSettings();
+  function saveSettings() { try { localStorage.setItem(SKEY, JSON.stringify(S)); } catch (e) { /* storage off */ } }
+  function truckText() {
+    var t = S.truck, p = PRESETS[S.preset];
+    return (p ? p.label : 'Custom truck') + ' · ' + mi(t.weightLbs) + ' lb · ' + (t.heightFt || 0) + '′' + (+t.heightIn ? t.heightIn + '″' : '') + ' · ' +
+      (S.prefs.routeType === 'short' ? 'Shortest' : 'Fastest') + (S.prefs.avoidTolls ? ' · no tolls' : '');
+  }
+
+  // ---------- waypoints ----------
+  var wps = [{ role: 'start', text: '' }, { role: 'end', text: '' }];
+  try { var saved = JSON.parse(sessionStorage.getItem('zr.mobile.trip') || 'null'); if (saved && saved.length >= 2) wps = saved; } catch (e) { /* ignore */ }
+  function keepTrip() { try { sessionStorage.setItem('zr.mobile.trip', JSON.stringify(wps)); } catch (e) { /* ignore */ } }
+  function roles() { wps.forEach(function (w, i) { w.role = i === 0 ? 'start' : i === wps.length - 1 ? 'end' : 'stop'; }); }
+  function renderWps() {
+    roles();
+    var box = $('#wps'); box.innerHTML = '';
+    wps.forEach(function (w, i) {
+      var row = document.createElement('div'); row.className = 'wp';
+      var ph = i === 0 ? 'Start: city, ZIP or address' : i === wps.length - 1 ? 'End: city, ZIP or address' : 'Stop ' + i;
+      row.innerHTML = '<span class="badge' + (i === wps.length - 1 ? ' end' : '') + '">' + LETTERS[i] + '</span>' +
+        '<input type="text" enterkeyhint="next" autocapitalize="words" spellcheck="false" placeholder="' + ph + '" value="' + esc(w.text) + '" aria-label="' + ph + '">' +
+        (w.role === 'stop' ? '<button type="button" class="x" aria-label="Remove stop">×</button>' : '');
+      box.appendChild(row);
+      var inp = $('input', row);
+      inp.addEventListener('input', function () { w.text = inp.value; delete w.lat; delete w.lng; keepTrip(); suggest(row, inp, w); });
+      inp.addEventListener('focus', function () { if (inp.value.length >= 2 && w.lat == null) suggest(row, inp, w); });
+      inp.addEventListener('blur', function () { setTimeout(function () { closeSug(row); }, 180); });
+      inp.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        var first = $('.sug li', row);
+        if (first) { e.preventDefault(); first.dispatchEvent(new Event('pick')); }
+      });
+      var x = $('.x', row); if (x) x.addEventListener('click', function () { wps.splice(i, 1); keepTrip(); renderWps(); });
+    });
+    $('#addStop').classList.toggle('hidden', wps.length >= MAX_STOPS + 2);
+  }
+  var sugTimer = null, sugSeq = 0;
+  function closeSug(row) { var u = $('.sug', row); if (u) u.remove(); }
+  function suggest(row, inp, w) {
+    clearTimeout(sugTimer);
+    var q = inp.value.trim();
+    if (q.length < 2) { closeSug(row); return; }
+    var seq = ++sugSeq;
+    sugTimer = setTimeout(function () {
+      var c = map.getCenter();
+      api('/api/autosuggest?q=' + encodeURIComponent(q) + '&at=' + c.lat.toFixed(4) + ',' + c.lng.toFixed(4)).then(function (j) {
+        if (seq !== sugSeq || document.activeElement !== inp) return;
+        closeSug(row);
+        showSug(row, inp, w, (j && j.items) || []);
+      }).catch(function () { /* typing still works without suggestions */ });
+    }, 220);
+  }
+  // v0.9.6: suggestion list; the "Search companies for ..." row runs a business-name search (OpenStreetMap)
+  function showSug(row, inp, w, items) {
+    closeSug(row);
+    if (!items.length) return;
+    var ul = document.createElement('ul'); ul.className = 'sug';
+    items.slice(0, 7).forEach(function (it) {
+      var li = document.createElement('li');
+      li.textContent = it.muted ? it.label : it.action ? '\ud83d\udd0d ' + it.title : (it.label || it.title);
+      if (it.action) li.className = 'act'; if (it.muted) li.className = 'mut';
+      var pick = function (e) {
+        if (e) e.preventDefault();
+        if (it.muted) return;
+        if (it.action === 'company') {
+          showSug(row, inp, w, [{ muted: true, label: 'Searching companies\u2026' }]);
+          api('/api/company?q=' + encodeURIComponent(it.q)).then(function (j) {
+            var list = j && j.ok ? j.items : [];
+            showSug(row, inp, w, list.length ? list : [{ muted: true, label: (j && j.error) || 'No company found. Try the street address.' }]);
+          }).catch(function () { showSug(row, inp, w, [{ muted: true, label: 'Company search failed' }]); });
+          return;
+        }
+        w.text = it.label || it.title; w.lat = it.lat; w.lng = it.lng; inp.value = w.text; keepTrip(); closeSug(row); nextInput(inp);
+      };
+      li.addEventListener('mousedown', pick); li.addEventListener('touchstart', pick, { passive: false }); li.addEventListener('pick', pick);
+      ul.appendChild(li);
+    });
+    row.appendChild(ul);
+  }
+  function nextInput(inp) {
+    var all = $$('#wps input'), i = all.indexOf(inp);
+    if (i >= 0 && i < all.length - 1 && !all[i + 1].value) all[i + 1].focus(); else inp.blur();
+  }
+  $('#addStop').addEventListener('click', function () { if (wps.length >= MAX_STOPS + 2) return; wps.splice(wps.length - 1, 0, { role: 'stop', text: '' }); renderWps(); $$('#wps input')[wps.length - 2].focus(); });
+  $('#swapBtn').addEventListener('click', function () { wps.reverse(); keepTrip(); renderWps(); });
+
+  // ---------- map ----------
+  var map = L.map('map', { zoomControl: false, attributionControl: true }).setView([39.5, -95], 4);
+  L.control.zoom({ position: 'topright' }).addTo(map);
+  var base = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+  var routeLayer = L.layerGroup().addTo(map), markerLayer = L.layerGroup().addTo(map);
+  var cfgP = api('/api/config').then(function (cfg) {
+    var u = cfg && cfg.tiles === 'tomtom' && window.ZR_TILE_URL ? window.ZR_TILE_URL('map') : null;
+    if (u) { map.removeLayer(base); base = L.tileLayer(u, { maxZoom: 20, attribution: 'Map tiles &copy; TomTom' }).addTo(map); }
+    if (cfg && cfg.keyCheck && cfg.keyCheck.status && cfg.keyCheck.status !== 'ok' && cfg.keyCheck.message) showMsg(cfg.keyCheck.message, 'info');
+    return cfg;
+  }).catch(function () { return null; });
+  function fit() { var b = null; routeLayer.eachLayer(function (l) { if (l.getBounds) b = b ? b.extend(l.getBounds()) : L.latLngBounds(l.getBounds().getSouthWest(), l.getBounds().getNorthEast()); }); if (b && b.isValid()) map.fitBounds(b, { padding: [28, 28] }); }
+
+  // ---------- run ----------
+  var last = null;
+  function showMsg(html, kind) { var m = $('#msg'); m.className = 'msg' + (kind === 'info' ? ' info' : ''); m.innerHTML = html; m.classList.toggle('hidden', !html); }
+  function setMode(results) {
+    $('#form').classList.toggle('hidden', results);
+    $('#tripLine').classList.toggle('hidden', !results);
+    $('#card').classList.toggle('hidden', !results);
+    setTimeout(function () { map.invalidateSize(); if (results) fit(); }, 30);
+  }
+  $('#editBtn').addEventListener('click', function () { setMode(false); });
+  $('#form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    showMsg('');
+    $$('#wps input').forEach(function (i) { i.blur(); });
+    var filled = wps.filter(function (w) { return (w.text && w.text.trim()) || isFinite(w.lat); });
+    if (!wps[0].text.trim()) { showMsg('Enter a Start.'); return; }
+    if (!wps[wps.length - 1].text.trim()) { showMsg('Enter an End.'); return; }
+    var btn = $('#runBtn'); btn.disabled = true; btn.textContent = 'Routing…';
+    var body = { truck: Object.assign({}, S.truck), prefs: Object.assign({}, S.prefs), waypoints: filled.map(function (w) { var o = { role: w.role, text: w.text }; if (isFinite(w.lat)) { o.lat = w.lat; o.lng = w.lng; o.label = w.text; } return o; }) };
+    cfgP.then(function () { return api('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); })
+      .then(function (j) {
+        if (!j || !j.ok) { showMsg(esc((j && j.error) || 'Routing failed.')); return; }
+        last = j; draw(j); setMode(true);
+      })
+      .catch(function (err) { showMsg('Could not route: ' + esc(err.message)); })
+      .then(function () { btn.disabled = false; btn.textContent = 'Run trip'; });
+  });
+  function draw(res) {
+    routeLayer.clearLayers(); markerLayer.clearLayers();
+    res.route.legs.forEach(function (leg) {
+      if (!leg.coordinates.length) return;
+      L.polyline(leg.coordinates, { color: '#fff', weight: 8, opacity: .9 }).addTo(routeLayer);
+      L.polyline(leg.coordinates, { color: '#184a7e', weight: 4.5, opacity: .95 }).addTo(routeLayer);
+    });
+    res.waypoints.forEach(function (w, i) {
+      var end = i === res.waypoints.length - 1;
+      L.marker([w.lat, w.lng], { icon: L.divIcon({ className: '', iconSize: [26, 26], iconAnchor: [13, 13], html: '<div class="mk' + (end ? ' end' : '') + '">' + LETTERS[i] + '</div>' }) })
+        .bindPopup('<b>' + LETTERS[i] + '</b> ' + esc(w.label)).addTo(markerLayer);
+    });
+    var r = res.route, t = r.totals;
+    $('#tripText').textContent = res.waypoints.map(function (w) { return short(w.label).split(',')[0]; }).join(' → ');
+    $('#cDist').innerHTML = mi(t.miles) + ' mi <small>· ' + dur(t.durationSec) + ' driving</small>';
+    var eta = res.hos && res.hos.arrivalTime ? when(res.hos.arrivalTime) : '', etaD = when(r.arrivalTime);
+    $('#cEta').innerHTML = eta ? 'Arrive <b>' + esc(eta) + '</b> <span style="color:var(--muted);font-size:13px">with HOS breaks</span>' : (etaD ? 'Arrive <b>' + esc(etaD) + '</b> (driving only)' : '');
+    var toll = r.tolls.available === false ? 'Tolls n/a' : r.tolls.sections === 0 || !(r.tolls.total > 0) ? 'No tolls' : 'Tolls ~' + money(r.tolls.total);
+    $('#cCost').innerHTML = esc(toll) + ' · Fuel ' + money(res.costs.fuelCost) + ' <span style="color:var(--muted);font-size:13px">(' + mi(res.costs.gallons) + ' gal)</span>';
+    $('#cTruck').textContent = 'Depart ' + when(r.departureTime) + ' · ' + truckText();
+    var crit = (r.notices || []).filter(function (n) { return n.severity === 'critical'; }).map(function (n) { return n.title; });
+    $('#cAlert').textContent = crit.length ? '⚠ ' + crit.join(' · ') : '';
+    $('#cAlert').classList.toggle('hidden', !crit.length);
+  }
+
+  // ---------- sheets ----------
+  function openSheet(title, html) { $('#sheetTitle').textContent = title; $('#sheetBody').innerHTML = html; $('#sheet').classList.remove('hidden'); $('#sheetBody').scrollTop = 0; }
+  function closeSheet() { if ($('#sheet').classList.contains('hidden')) return; if ($('#sheetTitle').textContent === 'Truck & route') settingsClosed(); $('#sheet').classList.add('hidden'); }
+  $('#sheetClose').addEventListener('click', closeSheet);
+  $('#sheet').addEventListener('click', function (e) { if (e.target.id === 'sheet') closeSheet(); });
+
+  $('#dirBtn').addEventListener('click', function () {
+    if (!last) return;
+    var r = last.route, h = '', n = 0, curLeg = -1;
+    (r.instructions || []).forEach(function (it) {
+      if (r.legs.length > 1 && it.leg !== curLeg) { curLeg = it.leg; h += '<div class="legh">' + esc(LETTERS[curLeg] + ' → ' + LETTERS[curLeg + 1] + ': ' + short(r.legs[curLeg].to)) + '</div>'; }
+      n++;
+      h += '<div class="dir"><span class="n">' + n + '</span><span class="d">' + esc(it.text) + '</span><span class="m">' + (it.lengthMeters ? mi(it.lengthMeters / 1609.344, it.lengthMeters < 16093 ? 1 : 0) + ' mi' : '') + '</span></div>';
+    });
+    openSheet('Directions', h || '<p class="note">No turn-by-turn for this trip.</p>');
+  });
+
+  function driverText(res, gm) {
+    var r = res.route, lines = [];
+    lines.push(res.waypoints.map(function (w) { return short(w.label); }).join(' → ') + ': ' + mi(r.totals.miles) + ' mi, ' + dur(r.totals.durationSec) + ' driving' + (r.tolls.total > 0 ? ', tolls ~' + money(r.tolls.total) : ''));
+    lines.push('Depart ' + when(r.departureTime));
+    if (res.hos && when(res.hos.arrivalTime)) lines.push('ETA ' + when(res.hos.arrivalTime) + ' (with HOS breaks)');
+    lines.push('Google Maps (car directions, follow the truck route): ' + gm);
+    return lines.join('\n');
+  }
+  $('#sendBtn').addEventListener('click', function () {
+    if (!last) return;
+    var gm = TRIPS.googleMapsUrl(last.waypoints.map(function (w) { return { lat: w.lat, lng: w.lng, label: w.label }; }));
+    var text = driverText(last, gm), subj = 'Route: ' + $('#tripText').textContent;
+    openSheet('Send to driver', '<textarea readonly id="dText">' + esc(text) + '</textarea>' +
+      '<div class="sacts">' + (navigator.share ? '<button type="button" class="pri" id="shareBtn">Share…</button>' : '') +
+      '<a href="sms:?&body=' + encodeURIComponent(text) + '">Text message</a>' +
+      '<button type="button" id="copyBtn">Copy</button>' +
+      '<a href="mailto:?subject=' + encodeURIComponent(subj) + '&body=' + encodeURIComponent(text) + '">Email</a>' +
+      '<a href="' + esc(gm) + '" target="_blank" rel="noopener">Open Google Maps</a></div>' +
+      '<p class="note">Google Maps uses car routing; the driver should follow the truck route. Nothing is sent until you send it.</p>');
+    $('#copyBtn').addEventListener('click', function () {
+      var ok = function () { toast('Copied'); };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(ok, function () { $('#dText').select(); document.execCommand('copy'); ok(); });
+      else { $('#dText').select(); document.execCommand('copy'); ok(); }
+    });
+    var sb = $('#shareBtn'); if (sb) sb.addEventListener('click', function () { navigator.share({ title: subj, text: text }).catch(function () { /* cancelled */ }); });
+  });
+
+  $('#fullBtn').addEventListener('click', function () {
+    var stops = (last ? last.waypoints : []).map(function (w) { return { label: w.label, lat: w.lat, lng: w.lng }; });
+    var t = { name: '', stops: stops, truck: Object.assign({}, S.truck), prefs: Object.assign({}, S.prefs), appts: {}, hos: {} };
+    var trip = TRIPS.sanitize(t);
+    location.href = trip ? TRIPS.shareUrl(new URL('./', location.href).href, trip) : './';
+  });
+
+  // ---------- truck settings sheet ----------
+  $('#setBtn').addEventListener('click', function () {
+    var t = S.truck, p = S.prefs;
+    var opts = Object.keys(PRESETS).map(function (k) { return '<option value="' + k + '"' + (S.preset === k ? ' selected' : '') + '>' + PRESETS[k].label + '</option>'; }).join('') + '<option value=""' + (!PRESETS[S.preset] ? ' selected' : '') + '>Custom</option>';
+    openSheet('Truck & route', '<div class="shead">Truck</div>' +
+      '<label class="fld"><span>Truck</span><select id="sPreset">' + opts + '</select></label>' +
+      '<label class="fld"><span>Weight (lb)</span><input id="sWeight" inputmode="numeric" value="' + esc(t.weightLbs) + '"></label>' +
+      '<div class="fld"><span>Height</span><span class="pair"><input id="sHft" inputmode="numeric" value="' + esc(t.heightFt) + '" aria-label="Height feet">ft<input id="sHin" inputmode="numeric" value="' + esc(t.heightIn) + '" aria-label="Height inches">in</span></div>' +
+      '<label class="fld"><span>Length (ft)</span><input id="sLen" inputmode="numeric" value="' + esc(t.lengthFt) + '"></label>' +
+      '<div class="shead">Route</div>' +
+      '<div class="fld"><span>Route type</span><span class="seg" id="sType"><button type="button" data-v="fast" class="' + (p.routeType !== 'short' ? 'on' : '') + '">Fastest</button><button type="button" data-v="short" class="' + (p.routeType === 'short' ? 'on' : '') + '">Shortest</button></span></div>' +
+      '<label class="fld"><span>Avoid toll roads</span><input type="checkbox" class="sw" id="sTolls"' + (p.avoidTolls ? ' checked' : '') + '></label>' +
+      '<label class="fld"><span>Use live traffic</span><input type="checkbox" class="sw" id="sTraffic"' + (p.considerTraffic ? ' checked' : '') + '></label>' +
+      '<div class="shead">Fuel</div>' +
+      '<label class="fld"><span>MPG</span><input id="sMpg" inputmode="decimal" value="' + esc(t.mpg) + '"></label>' +
+      '<label class="fld"><span>Fuel $/gal</span><input id="sFuel" inputmode="decimal" value="' + esc(t.fuelPrice) + '"></label>' +
+      '<p class="note">Saved on this phone. Tandem rules, hazmat, costs and the full reports are in the Full router.</p>');
+    $('#sPreset').addEventListener('change', function () {
+      var pr = PRESETS[this.value]; if (!pr) return;
+      $('#sWeight').value = pr.v.weightLbs; $('#sHft').value = pr.v.heightFt; $('#sHin').value = pr.v.heightIn; $('#sLen').value = pr.v.lengthFt;
+    });
+    $$('#sType button').forEach(function (b) { b.addEventListener('click', function () { $$('#sType button').forEach(function (x) { x.classList.toggle('on', x === b); }); }); });
+  });
+  function readSheetSettings() {
+    if (!$('#sPreset')) return false;
+    var num = function (id, d) { var v = String($(id).value).replace(/,/g, '').trim(); return v === '' || !isFinite(+v) ? d : v; };
+    var pr = PRESETS[$('#sPreset').value];
+    if (pr) S.truck = Object.assign(S.truck, pr.v);
+    S.preset = $('#sPreset').value;
+    S.truck.weightLbs = num('#sWeight', S.truck.weightLbs); S.truck.heightFt = num('#sHft', S.truck.heightFt); S.truck.heightIn = num('#sHin', 0); S.truck.lengthFt = num('#sLen', S.truck.lengthFt);
+    if (pr && (String(S.truck.weightLbs) !== String(pr.v.weightLbs) || String(S.truck.heightFt) !== String(pr.v.heightFt) || String(S.truck.heightIn) !== String(pr.v.heightIn) || String(S.truck.lengthFt) !== String(pr.v.lengthFt))) S.preset = '';
+    var on = $('#sType button.on'); S.prefs.routeType = on ? on.dataset.v : 'fast';
+    S.prefs.avoidTolls = $('#sTolls').checked; S.prefs.considerTraffic = $('#sTraffic').checked;
+    S.truck.mpg = num('#sMpg', S.truck.mpg); S.truck.fuelPrice = num('#sFuel', S.truck.fuelPrice);
+    saveSettings();
+    return true;
+  }
+  function settingsClosed() {
+    var before = JSON.stringify(S); readSheetSettings();
+    if (JSON.stringify(S) === before) return;
+    if (last) { toast('Saved. Re-running trip…'); $('#runBtn').click(); } else toast('Settings saved');
+  }
+
+  // ---------- start ----------
+  (function fromUrl() {
+    var q = new URLSearchParams(location.search), f = q.get('from'), t = q.get('to');
+    if (f && t) { wps = [{ role: 'start', text: f }, { role: 'end', text: t }]; keepTrip(); }
+    renderWps();
+    if (f && t && q.get('run') === '1') setTimeout(function () { $('#runBtn').click(); }, 50);
+  })();
+})();
+</script>
+</body>
+</html>

@@ -570,7 +570,12 @@ function buildRouteRequest({ truck, prefs, points, departAt }) {
   points.forEach((p, i) => { if (!validLatLng(p)) throw new InputError(`Waypoint ${i + 1} has no valid coordinates.`); });
   prefs = prefs || {};
   const p = truckProfile(truck);
-  const locs = points.map(pt => `${(+pt.lat).toFixed(6)},${(+pt.lng).toFixed(6)}`).join(':');
+  // v0.9.6: pt.via = a pass-through point from dragging the route: a TomTom "circle" waypoint, which bends the
+  // route without adding a stop or a leg. Radius in meters (TomTom: positive integer, max 135000).
+  const hasVia = points.some(pt => pt.via);
+  const locs = points.map(pt => pt.via
+    ? `circle(${(+pt.lat).toFixed(6)},${(+pt.lng).toFixed(6)},${Math.max(50, Math.min(135000, Math.round(+pt.r || 1500)))})`
+    : `${(+pt.lat).toFixed(6)},${(+pt.lng).toFixed(6)}`).join(':');
   const q = new URLSearchParams();
   q.set('travelMode', 'truck');
   q.set('routeType', prefs.routeType === 'short' ? 'shortest' : 'fastest');
@@ -586,7 +591,7 @@ function buildRouteRequest({ truck, prefs, points, departAt }) {
   if (p.heightM) q.set('vehicleHeight', p.heightM.toFixed(2));
   if (p.maxSpeedKmh) q.set('vehicleMaxSpeed', String(p.maxSpeedKmh));
   for (const lt of p.loadTypes) q.append('vehicleLoadType', lt);
-  if (prefs.reorderStops && points.length >= 4) q.set('computeBestOrder', 'true');
+  if (prefs.reorderStops && !hasVia && points.length >= 4) q.set('computeBestOrder', 'true'); // TomTom: no circle waypoints with computeBestOrder
   q.set('instructionsType', 'text');
   q.set('language', 'en-US');
   for (const st of ['toll', 'tunnel', 'ferry', 'unpaved', 'traffic', 'travelMode', 'country']) q.append('sectionType', st);
@@ -845,8 +850,6 @@ function preferenceWarnings(prefs = {}, truck = {}) {
 function tileUrl(view, z, x, y) {
   if (view === 'map') return `${BASE}/map/1/tile/basic/main/${z}/${x}/${y}.png?tileSize=256&view=Unified&language=en-US`;
   if (view === 'satellite') return z <= 19 ? `${BASE}/map/1/tile/sat/main/${z}/${x}/${y}.jpg` : null;
-  if (view === 'traffic') return `${BASE}/traffic/map/4/tile/flow/relative/${z}/${x}/${y}.png?tileSize=256`;
-  if (view === 'incidents') return `${BASE}/traffic/map/4/tile/incidents/s1/${z}/${x}/${y}.png?tileSize=256`;
   if (view === 'satlabels') return `${BASE}/map/1/tile/hybrid/main/${z}/${x}/${y}.png?tileSize=256&view=Unified&language=en-US`;
   return null; // no terrain layer in TomTom raster Map Display -> client falls back to OpenTopoMap
 }

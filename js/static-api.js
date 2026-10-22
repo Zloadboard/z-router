@@ -10,6 +10,7 @@
   var KEY = String((window.ZR_CONFIG && window.ZR_CONFIG.tomtomKey) || '').trim();
   var TRUCK_TYPES = [{"id":"semi","label":"Truck Semi"},{"id":"double","label":"Semi w/ Double Trailer"},{"id":"triple","label":"Semi w/ Triple Trailer"},{"id":"bobtail","label":"Bobtail (Tractor only)"},{"id":"straight","label":"Straight Truck"},{"id":"straightTrailer","label":"Straight Truck w/ Trailer"},{"id":"light","label":"Light Truck / Cargo Van"}];
   var TIMEOUT_MS = 30000;
+  var DETOUR_RATIO = 1.45; // v0.9.6: road miles vs straight line; normal truck trips are ~1.15-1.30
   var LABEL = 'TomTom';
   var KEY_MISSING = 'Routing API key not configured: this static build has no TomTom key in config.js. Rebuild it with TOMTOM_WEB_API_KEY set.';
   var realFetch = window.fetch.bind(window);
@@ -69,7 +70,7 @@
   }
 
   var tomtomTiles = false, trafficTiles = false;
-  // The traffic overlay needs the Traffic API ticked on the (domain-locked) web key. Probe one flow tile with an <img> (sends our Referer, no CORS needed).
+  // Live traffic needs the Traffic API ticked on the (domain-locked) key. Probe one flow tile with an <img> (sends our Referer, no CORS needed).
   function probeTraffic() {
     return new Promise(function (resolve) {
       var im = new Image(), done = false, fin = function (ok) { if (!done) { done = true; trafficTiles = ok; resolve(); } };
@@ -116,15 +117,47 @@
       });
     });
   }
+  // v0.9.6: company / business names. TomTom Search (which knows businesses) is out of credits, so names go to
+  // OpenStreetMap's Nominatim. Its rules: no search-as-you-type, at most 1 request per second, so it runs only
+  // when the dispatcher picks "Search companies" or runs a trip with a name typed in, and answers are cached.
+  var NOMI_URL = 'https://nominatim.openstreetmap.org/search', nomiLast = 0, nomiCache = {};
+  function companySearch(q, limit) {
+    var key = String(q).trim().toLowerCase() + '|' + (limit || 6);
+    if (nomiCache[key]) return Promise.resolve(nomiCache[key]);
+    var wait = Math.max(0, nomiLast + 1100 - Date.now());
+    nomiLast = Date.now() + wait;
+    return new Promise(function (r) { setTimeout(r, wait); }).then(function () {
+      var u = NOMI_URL + '?format=jsonv2&addressdetails=1&countrycodes=us,ca,mx&limit=' + (limit || 6) + '&q=' + encodeURIComponent(String(q).trim());
+      var o = { headers: { Accept: 'application/json' } };
+      if (window.AbortSignal && AbortSignal.timeout) o.signal = AbortSignal.timeout(15000);
+      return realFetch(u, o);
+    }).then(function (res) { if (!res.ok) throw ProviderError('Company search is busy (HTTP ' + res.status + '). Try again in a minute.', 502, 'COMPANY_SEARCH'); return res.json(); })
+      .then(function (arr) {
+        var items = (Array.isArray(arr) ? arr : []).filter(function (x) { return isFinite(+x.lat) && isFinite(+x.lon); }).map(function (x) {
+          var a = x.address || {}, st = String(a['ISO3166-2-lvl4'] || '').replace(/^[A-Z]{2}-/, '');
+          var city = a.city || a.town || a.village || a.hamlet || a.suburb || a.county || '';
+          var street = [a.house_number, a.road].filter(Boolean).join(' ');
+          var place = [street, city, st + (a.postcode ? ' ' + a.postcode : '')].filter(function (v) { return String(v).trim(); }).join(', ');
+          var name = x.name || String(x.display_name || '').split(',')[0];
+          return { id: 'osm:' + x.osm_type + x.osm_id, title: name, label: (name && place ? name + ', ' + place : place || name), lat: +x.lat, lng: +x.lon, source: 'OpenStreetMap', resultType: 'Company' };
+        });
+        nomiCache[key] = items;
+        return items;
+      }, function (e) { if (e && e.code) throw e; throw ProviderError('Could not reach company search (OpenStreetMap). Try the street address instead.', 502, 'COMPANY_SEARCH'); });
+  }
+  function looksLikeAddress(q) { return /^\s*\d+[a-z]?\s+\S/i.test(q); }
   function tomtomSuggest(q, at) { var r = tomtom.buildSearchRequest({ q: q, at: at }); return providerGet(r.url, r.params).then(tomtom.normalizeSearch); }
   // Cities and ZIPs come from the built-in list first (free, instant); street addresses and no-match go to TomTom.
+  // v0.9.6: the last row of every suggestion list is "Search companies for ..." (runs the company search on pick)
+  function companyRow(q) { return { id: 'company-search', action: 'company', q: q, title: 'Search companies for \u201c' + q + '\u201d', label: 'Business names (OpenStreetMap)' }; }
   function suggest(q, at) {
-    if (!places) return tomtomSuggest(q, at);
+    var withCompany = function (items) { items = items || []; return /[a-z]{3}/i.test(q) ? items.concat([companyRow(q)]) : items; };
+    if (!places) return tomtomSuggest(q, at).then(withCompany);
     return places.suggest(q, at).catch(function () { return null; }).then(function (local) {
-      if (local && local.length) return local;
+      if (local && local.length) return withCompany(local);
       return tomtomSuggest(q, at).catch(function (e) {
         return geocodeApi(q, 5).catch(function () { if (local) return []; throw e; });
-      });
+      }).then(withCompany);
     });
   }
   // typed text without a picked suggestion -> TomTom fuzzy Search (the Pages key has no Geocoding API)
@@ -138,8 +171,12 @@
     return first.then(function (hit) {
       if (hit) return hit;
       return tomtomGeocode(q, opts).catch(function (e) {
-        // TomTom cannot answer (no credits, network): fall back to the city in the text, if there is one.
-        return geocodeApi(q, 1).then(function (r) { return r[0] ? { label: r[0].label, lat: r[0].lat, lng: r[0].lng } : null; }, function () { return null; })
+        // TomTom cannot answer (no credits, network): street addresses -> TomTom Geocoding; names -> company search;
+        // then the city in the text, if there is one.
+        var nameFirst = !exact && !looksLikeAddress(q);
+        var company = function () { return companySearch(q, 1).then(function (r) { return r[0] ? { label: r[0].label, lat: r[0].lat, lng: r[0].lng } : null; }, function () { return null; }); };
+        return (nameFirst ? company() : Promise.resolve(null))
+          .then(function (h) { return h || geocodeApi(q, 1).then(function (r) { return r[0] ? { label: r[0].label, lat: r[0].lat, lng: r[0].lng } : null; }, function () { return null; }); })
           .then(function (h) { return h || (exact ? places.lookup(q).catch(function () { return null; }) : null); })
           .then(function (h) { return h || places.cityOf(q).catch(function () { return null; }); })
           .then(function (h) { if (h) return h; throw e; });
@@ -194,17 +231,63 @@
     route.legs.forEach(function (l) { l.costs = calc.computeCosts(Object.assign({ miles: l.miles, seconds: l.durationSec, tollCost: l.tollCost }, opts)); });
     return costs;
   }
+  // v0.9.6: TomTom's fastest truck route sometimes takes a long detour (Romeoville -> Palestine TX went via
+  // Kansas City). Ask for up to 2 alternatives in the same request and use a clearly shorter one when it is
+  // barely slower. Not with re-ordered stops or drag points (TomTom does not allow / the dispatcher chose the way).
+  var ALT_MAX_SLOWER = 1.10, ALT_MAX_SLOWER_SEC = 20 * 60, ALT_MIN_SHORTER = 0.95;
+  function pickRoute(json) {
+    var rs = (json && json.routes) || [];
+    if (rs.length < 2) return 0;
+    var sum = function (r) { var s = r.summary || {}; return { m: +s.lengthInMeters || 0, t: +s.travelTimeInSeconds || 0 }; };
+    var ref = sum(rs[0]), best = 0, bestM = ref.m;
+    rs.forEach(function (r, i) {
+      var x = sum(r);
+      if (i && x.m && x.m < bestM && x.m <= ref.m * ALT_MIN_SHORTER && x.t <= ref.t * ALT_MAX_SLOWER && x.t - ref.t <= ALT_MAX_SLOWER_SEC) { best = i; bestM = x.m; }
+    });
+    return best;
+  }
+  function addAlternatives(req, prefs, points) {
+    if (req.params.get('computeBestOrder') === 'true' || prefs.routeType === 'short' || points.some(function (p) { return p.via; })) return false;
+    req.params.set('maxAlternatives', '2');
+    return true;
+  }
   function planTomTom(o) {
     var truck = o.truck, prefs = o.prefs, points = o.points, warnings = o.warnings;
-    var req = tomtom.buildRouteRequest({ truck: truck, prefs: prefs, points: points });
+    var reqPoints = o.reqPoints || points;
+    var req = tomtom.buildRouteRequest({ truck: truck, prefs: prefs, points: reqPoints });
+    var alts = addAlternatives(req, prefs, reqPoints);
+    // v0.9.7: TomTom's alternatives can miss the obvious road. Houston -> Jacksonville: "fastest" looped up through
+    // Montgomery (1,007 mi, 16.2 h) while TomTom's own "shortest" truck route stayed near I-10 (883 mi, 14.0 h, i.e.
+    // shorter AND faster). So the same trip is also asked as "shortest" (one more routing call) and joins the choice.
+    var shortP = alts ? (function () {
+      var sr = tomtom.buildRouteRequest({ truck: truck, prefs: Object.assign({}, prefs, { routeType: 'short' }), points: reqPoints });
+      return providerGet(sr.url, sr.params).then(function (j) { return j && j.routes && j.routes[0] ? j.routes[0] : null; }, function () { return null; });
+    })() : Promise.resolve(null);
     return providerGet(req.url, req.params).catch(function (e) {
       if (e.code === 'PROVIDER_ERROR' && req.params.get('departAt') && /depart/i.test(e.message)) {
         warnings.push('TomTom rejected the depart time (' + req.params.get('departAt') + '): ' + e.message.replace(/^TomTom error: /, '') + '. Routed with departure = now.');
-        req = tomtom.buildRouteRequest({ truck: truck, prefs: prefs, points: points, departAt: null });
+        req = tomtom.buildRouteRequest({ truck: truck, prefs: prefs, points: reqPoints, departAt: null });
+        alts = addAlternatives(req, prefs, reqPoints);
+        return providerGet(req.url, req.params);
+      }
+      if (alts && e.code === 'PROVIDER_ERROR' && /alternative/i.test(e.message)) { // alternatives refused: plain request
+        req.params.delete('maxAlternatives'); alts = false;
         return providerGet(req.url, req.params);
       }
       throw e;
     }).then(function (json) {
+      return shortP.then(function (sr) { if (sr && json && json.routes) json.routes.push(sr); return json; });
+    }).then(function (json) {
+      if (alts && json && json.routes && json.routes.length > 1) {
+        var k = pickRoute(json), r0 = json.routes[0].summary || {};
+        if (k > 0) {
+          var rk = json.routes[k].summary || {};
+          var saved = Math.round(((+r0.lengthInMeters) - (+rk.lengthInMeters)) / 1609.344), extra = Math.round(((+rk.travelTimeInSeconds) - (+r0.travelTimeInSeconds)) / 60);
+          json.routes = [json.routes[k]].concat(json.routes.filter(function (_, i) { return i !== k; }));
+          warnings.push('Used a more direct truck route: ' + saved + ' mi shorter' + (extra > 0 ? ', about ' + extra + ' min longer' : ' and no slower') + ' than TomTom\'s fastest.');
+        }
+        json.routes = [json.routes[0]]; // the rest is not needed
+      }
       var order = points.map(function (_, i) { return i; }), reordered = false;
       if (req.params.get('computeBestOrder') === 'true' && json && json.routes && json.routes[0]) {
         var ord = tomtom.resolveOrder(json, points);
@@ -235,13 +318,34 @@
     if (filled.length < 2 || filled[filled.length - 1].role !== 'end') throw new common.InputError('Enter an End location.');
     if (filled.length > 7) throw new common.InputError('Up to 5 stops plus Start and End are supported.');
     var warnings = [], points, r, costs;
+    // v0.9.6: pass-through points from dragging the route line: [{lat, lng, leg, pos, r}], leg = which leg
+    // (0 = Start -> first stop), pos = where along that leg (0..1).
+    var via = (Array.isArray(body.via) ? body.via : []).filter(function (v) { return v && common.validLatLng(v) && isFinite(v.leg); }).slice(0, 20);
     return resolveWaypoints(filled).then(function (p) {
       points = p;
       if (points.every(function (q) { return common.haversineMeters([q.lat, q.lng], [points[0].lat, points[0].lng]) < 100; })) throw new common.InputError('Start and End are the same place. Enter a different End (or add a stop).');
       if (prefs.reorderStops && points.length < 4) warnings.push('Re-order Stops needs at least 2 intermediate stops; nothing to re-order.');
-      return planTomTom({ truck: truck, prefs: prefs, points: points, warnings: warnings });
+      var reqPoints = points;
+      via = via.filter(function (v) { return v.leg >= 0 && v.leg < points.length - 1; });
+      if (via.length) {
+        if (prefs.reorderStops && points.length >= 4) warnings.push('Re-order Stops is off while the route has dragged points.');
+        reqPoints = [];
+        points.forEach(function (pt, i) {
+          reqPoints.push(pt);
+          via.filter(function (v) { return v.leg === i; }).sort(function (a, b) { return (+a.pos || 0) - (+b.pos || 0); })
+            .forEach(function (v) { reqPoints.push({ lat: +v.lat, lng: +v.lng, via: true, r: +v.r || 1500 }); });
+        });
+      }
+      return planTomTom({ truck: truck, prefs: prefs, points: points, reqPoints: reqPoints, warnings: warnings });
     }).then(function (res) {
       r = res;
+      // v0.9.6: say so when a route is far longer than the straight line through the stops (a detour to check)
+      if (!via.length) {
+        var line = 0;
+        for (var k = 1; k < points.length; k++) line += common.haversineMeters([points[k - 1].lat, points[k - 1].lng], [points[k].lat, points[k].lng]);
+        var lineMi = line / 1609.344, mi = r.route.totals.miles;
+        if (lineMi > 100 && mi > lineMi * DETOUR_RATIO) warnings.push('Check this route: it is ' + Math.round((mi / lineMi - 1) * 100) + '% longer than a straight line between the stops. To change it, drag the route line on the map.');
+      }
       costs = costsFor(r.route, truck);
       return routeStatesAndTandem(r.route, truck, warnings);
     }).then(function (st) {
@@ -255,7 +359,7 @@
       return {
         ok: true, demo: false, provider: 'tomtom', providerLabel: LABEL,
         waypoints: r.order.map(function (i) { return Object.assign({}, points[i], { originalIndex: filled[i].idx }); }),
-        reordered: r.reordered, route: r.route, costs: costs, economics: economics, hos: hos,
+        reordered: r.reordered, via: via, route: r.route, costs: costs, economics: economics, hos: hos,
         states: st.runs, statesSummary: states.summary(st.runs), tandem: st.tandem, warnings: warnings,
         request: { provider: 'tomtom', truckProfile: r.profile, params: pobj, effectiveSettings: r.effectiveSettings || undefined }
       };
@@ -288,6 +392,11 @@
         if (q.length < 2) return reply(200, { ok: true, items: [] });
         if (!KEY) return reply(503, { ok: false, code: 'API_KEY_MISSING', error: KEY_MISSING, items: [] });
         return suggest(q, u.searchParams.get('at')).then(function (items) { return reply(200, { ok: true, items: items }); });
+      }
+      if (p === '/api/company') {
+        var cq = (u.searchParams.get('q') || '').trim();
+        if (cq.length < 3) return reply(200, { ok: true, items: [] });
+        return companySearch(cq, 6).then(function (items) { return reply(200, { ok: true, items: items, source: 'OpenStreetMap' }); });
       }
       if (p === '/api/geocode') {
         var g = (u.searchParams.get('q') || '').trim();
@@ -331,14 +440,11 @@
   window.ZR_TILE_URL = function (view) {
     if (!KEY) return null;
     var k = 'key=' + encodeURIComponent(KEY);
-    // Traffic is its own TomTom service: it must not depend on the map-tile probe.
     if (view === 'traffic') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?tileSize=256&' + k : null;
     if (view === 'incidents') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/incidents/s1/{z}/{x}/{y}.png?tileSize=256&' + k : null;
     if (!tomtomTiles) return null;
     if (view === 'map') return 'https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?tileSize=256&view=Unified&language=en-US&' + k;
     if (view === 'satellite') return 'https://api.tomtom.com/map/1/tile/sat/main/{z}/{x}/{y}.jpg?' + k;
-    if (view === 'traffic') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?tileSize=256&' + k : null;
-    if (view === 'incidents') return trafficTiles ? 'https://api.tomtom.com/traffic/map/4/tile/incidents/s1/{z}/{x}/{y}.png?tileSize=256&' + k : null;
     if (view === 'satlabels') return 'https://api.tomtom.com/map/1/tile/hybrid/main/{z}/{x}/{y}.png?tileSize=256&view=Unified&language=en-US&' + k;
     return null;
   };

@@ -54,10 +54,11 @@
   /** Tab target after box `from` (v0.9.5). filled[i]: box i has text; last = End. -1 = Run Trip.
    * Tab goes to the very next box (Start -> Stop 1 -> Stop 2 ...), so stops can be typed in order.
    * Tab in an EMPTY stop box means "no more stops": jump to End (or Run Trip when End is filled). From End: Run Trip. */
+  // v0.9.6: Tab goes box by box in order (Start, Stop 1..5, End, then Run Trip). It used to jump from an empty stop
+  // box straight to End / Run Trip, which dispatchers found confusing ("2 Tabs and I am on Run Trip").
   function nextTab(filled, from) {
     var last = filled.length - 1;
     if (from >= last) return -1;
-    if (from > 0 && !filled[from]) return filled[last] ? -1 : last;
     return from + 1;
   }
 
@@ -78,7 +79,8 @@
   function pickIndex(items, active) {
     items = items || [];
     if (active >= 0 && items[active] && !items[active].muted) return active;
-    for (var i = 0; i < items.length; i++) if (items[i] && !items[i].muted) return i;
+    // v0.9.6: an action row ("Search companies for ...") is used only when highlighted, never picked automatically
+    for (var i = 0; i < items.length; i++) if (items[i] && !items[i].muted && !items[i].action) return i;
     return -1;
   }
 

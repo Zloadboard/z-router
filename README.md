@@ -12,19 +12,22 @@ A static site cannot hide an API key. `config.js` contains a TomTom key made onl
 
 ## Files
 
-- `index.html`, `css/`, `js/`: the app (same UI as the desktop version)
+- `index.html`, `mobile.html`, `css/`, `js/`: the app (desktop page and phone page)
 - `js/static-api.js`: answers the app's `/api/*` calls in the browser and calls TomTom
 - `js/zr-lib.js`: TomTom request builder/parser, state lookup, tandem rules and cost math (bundled from the desktop version)
-- `features.json`: which features regular visitors see (edit with the Owner panel; see the main README, "Owner mode"). `owner.json`: salted hash of the owner code (never the code). `x/*.js`: hash-named feature files, loaded only when allowed
 - `data/tandem-rules.json`: state tandem rules; `data/us-states.geojson`: state boundaries (US Census, public domain)
 - `vendor/`: Leaflet (BSD-2-Clause) and the Inter font (SIL Open Font License)
 
 Route results are planning estimates. Before dispatch, check posted signs, clearances, weight and hazmat limits, tandem rules, permits and road conditions.
 
-## Freight Board links and crossdocks (v0.9.3)
+## Version 0.9.9 (Oct 22, 2026): same as the team router, without crossdocks
 
-Crossdocks is a feature flag since v0.10.0 (off for visitors unless the owner turns it on; the trip links still work in Basic mode).
+This site now runs the same code as the team router on the Freight Board site (`z-router/` in the private board repo), copied over with these differences:
 
-- The Freight Board's 🗺 Route button opens `?from=…&stop=…&to=…&rate=…&date=…&run=1` (each place is text or `text@lat,lng`; up to 5 stops). Truck and routing settings are left as they are. `deadhead=leg1` marks the first leg empty.
-- **Crossdocks** map layer: the partner list from the Freight Board's Crossdock section (same website, so its synced list is readable here; the built-in list in `data/crossdocks-default.json` is used until the board has saved one). Addresses are looked up once and remembered in the browser. Green = within 25 mi of the current route; the Legs report lists them by route mile. `?xdock=1` opens with the layer on and zoomed to all of them.
-- The load rate (and deadhead choice) is never saved in the browser.
+- `config.js` sets `window.ZR_PUBLIC = true`: no Crossdocks button or layer (even with `?xdock=1`, and even if this browser still has an old crossdock list saved), and no usage counter.
+- `data/crossdocks-default.json` and `usage.html` are not published here.
+- No Basic mode: every visitor gets the full router (address and company search, drag to reroute, Street View / Satellite, 3 stop boxes + Add stop, phone page `mobile.html`).
+
+Files from the old Basic-mode build (`js/gate.js`, `js/features.js`, `features.json`, `owner.json`, `x/*.js`) are no longer loaded by the page.
+
+Freight Board links (`?from=…&stop=…&to=…&rate=…&date=…&run=1`) still work.
